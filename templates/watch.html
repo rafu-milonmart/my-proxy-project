@@ -974,6 +974,10 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           qualityGroup.style.display='inline-flex';
           if(dashPlayer.isDynamic&&dashPlayer.isDynamic())setLiveMode(true);
         });
+        dashPlayer.on(dashjs.MediaPlayer.events.ERROR,function(e){
+          showPlaceholder('Stream unavailable — try another server');
+          spinner.classList.add('hidden');
+        });
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){

@@ -348,13 +348,25 @@ def proxy_manifest(slug, idx):
     drm_key = s.get('drm_key', '')
 
     http = get_media_http()
-    try:
-        r = http.get(url)
-        if r.status_code != 200:
-            return jsonify({"error": f"Could not fetch manifest, upstream returned {r.status_code}"}), 502
-        body = r.text
-    except Exception as e:
-        return jsonify({"error": f"Could not fetch manifest: {e}"}), 502
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = http.get(url)
+            if resp.status_code == 200:
+                break
+            logging.warning(f"proxy_manifest attempt {attempt+1} got {resp.status_code}")
+        except Exception as e:
+            logging.warning(f"proxy_manifest attempt {attempt+1} failed: {e}")
+        if attempt < 2:
+            time.sleep(1)
+            servers = fetch_playback(slug)
+            if servers:
+                result = decrypt_payload(servers[0]['enc'], str(servers[0]['bucket']))
+                if result and 'streams' in result and 0 <= idx < len(result['streams']):
+                    url = result['streams'][idx]['stream_url']
+    else:
+        return jsonify({"error": "Stream unavailable"}), 502
+    body = resp.text
 
     if drm_kid and drm_key and '.mpd' in url:
         base_url = url[:url.rfind('/') + 1]
