@@ -13,6 +13,15 @@ app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 logging.basicConfig(level=logging.INFO)
 
+
+@app.after_request
+def add_cors(resp):
+    if request.path.startswith(('/stream/', '/proxy/', '/api/', '/playlist.')):
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    return resp
+
 UPSTREAM = "https://s1.sportzfytvlive.xyz"
 DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
@@ -29,7 +38,6 @@ _http_headers = {
 }
 _media_headers = {
     "Accept": "*/*",
-    "Referer": UPSTREAM + "/",
     "Origin": UPSTREAM,
     "X-Requested-With": "lsp",
     "X-LSP-Enc": "1",
@@ -274,7 +282,7 @@ def _hls_rewrite(body, base_dir, slug, idx):
         if not stripped:
             out.append(line)
         elif stripped.startswith('#'):
-            out.append(re.sub(r'URI="([^"]*)"', lambda m: 'URI="' + rw(m.group(1)) + '"', line))
+            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', lambda m: 'URI="' + rw(m.group(1) or m.group(2)) + '"', line))
         else:
             out.append(rw(stripped))
     return '\n'.join(out)
@@ -351,10 +359,18 @@ def proxy_manifest(slug, idx):
     resp = None
     for attempt in range(3):
         try:
-            resp = http.get(url)
+            resp = http.get(url, headers={
+                'Origin': UPSTREAM,
+                'Accept': '*/*',
+                'X-Requested-With': 'lsp',
+                'X-LSP-Enc': '1',
+            })
             if resp.status_code == 200:
                 break
             logging.warning(f"proxy_manifest attempt {attempt+1} got {resp.status_code}")
+            # On 400/403, retry with fresh playback data (URL may have expired)
+            if resp.status_code in (400, 403) and attempt == 0:
+                pass  # fall through to re-fetch below
         except Exception as e:
             logging.warning(f"proxy_manifest attempt {attempt+1} failed: {e}")
         if attempt < 2:
@@ -373,6 +389,17 @@ def proxy_manifest(slug, idx):
         proxy_base = request.host_url.rstrip('/') + '/proxy/hls/' + slug + '/' + str(idx) + '/?url='
         body = re.sub(r'<BaseURL[^>]*>[^<]*</BaseURL>', '', body)
         body = re.sub(r'(<MPD[^>]*>)', r'\1\n<BaseURL>' + proxy_base + '</BaseURL>', body, count=1)
+
+        # Inject ClearKey ContentProtection if we have the key
+        if drm_kid and drm_key:
+            ck_uuid = 'urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e'
+            ck_tag = '\n<ContentProtection schemeIdUri="' + ck_uuid + '" value="ClearKey"/>'
+            # Inject into every Representation that already has CENC protection
+            body = re.sub(
+                r'(<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*/>)',
+                r'\1' + ck_tag,
+                body
+            )
 
     return Response(body, content_type='application/dash+xml')
 
