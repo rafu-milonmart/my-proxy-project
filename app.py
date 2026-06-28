@@ -248,7 +248,6 @@ def proxy_api(subpath):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/proxy/manifest/<slug>/<int:idx>')
 def _hls_rewrite(body, base_dir, slug, idx):
     def rw(line_url):
         p = urlparse(line_url)
