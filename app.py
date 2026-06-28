@@ -31,6 +31,8 @@ _media_headers = {
     "Accept": "*/*",
     "Referer": UPSTREAM + "/",
     "Origin": UPSTREAM,
+    "X-Requested-With": "lsp",
+    "X-LSP-Enc": "1",
 }
 _tlocal = threading.local()
 
@@ -301,9 +303,11 @@ def proxy_hls(slug, idx):
 
     http = get_media_http()
     resp = None
+    logging.info(f"proxy_hls slug={slug} idx={idx} target={target[:120]}")
     for attempt in range(2):
         try:
             resp = http.get(target)
+            logging.info(f"proxy_hls attempt {attempt+1} status={resp.status_code} len={len(resp.content)}")
             if resp.status_code == 200:
                 break
             logging.warning(f"proxy_hls attempt {attempt+1} got {resp.status_code} for {target[:80]}")
