@@ -358,13 +358,16 @@ def proxy_manifest(slug, idx):
 
     if drm_kid and drm_key and '.mpd' in url:
         base_url = url[:url.rfind('/') + 1]
-        # Insert BaseURL after <MPD ...> opening tag using regex to keep tag intact
         if '<BaseURL>' not in body:
             body = re.sub(r'(<MPD[^>]*>)', r'\1\n<BaseURL>' + base_url + '</BaseURL>', body, count=1)
-        # Inject ClearKey ContentProtection before first AdaptationSet
+
         kid_clean = drm_kid.replace('-', '').replace(' ', '')
         if len(kid_clean) == 32:
             kid_uuid = f"{kid_clean[:8]}-{kid_clean[8:12]}-{kid_clean[12:16]}-{kid_clean[16:20]}-{kid_clean[20:32]}"
+            # Strip all existing ContentProtection from AdaptationSets (PlayReady, Widevine, etc.)
+            body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
+            body = re.sub(r'<ContentProtection[^>]*/>', '', body)
+            # Inject ClearKey ContentProtection before first AdaptationSet
             clearkey_xml = f'''<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b" value="ClearKey">
 <cenc:default_KID>{kid_uuid}</cenc:default_KID>
 </ContentProtection>'''
