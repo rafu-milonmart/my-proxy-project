@@ -975,11 +975,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(typeof dashjs==='undefined'){showPlaceholder('Dash.js failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
         var dashPlayer=dashjs.MediaPlayer().create();
-        if(drmKid&&drmKey){
-          var p={'org.w3.clearkey':{'clearkeys':{}}};
-          p['org.w3.clearkey']['clearkeys'][drmKid]=drmKey;
-          dashPlayer.setProtectionData(p);
-        }
+        // Always proxy DASH manifest (CDN blocks direct browser requests)
+        url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx;
         dashPlayer.initialize(video,url,true);
         player=dashPlayer;
         startPlay();

@@ -368,23 +368,11 @@ def proxy_manifest(slug, idx):
         return jsonify({"error": "Stream unavailable"}), 502
     body = resp.text
 
-    if drm_kid and drm_key and '.mpd' in url:
-        base_url = url[:url.rfind('/') + 1]
-        if '<BaseURL>' not in body:
-            body = re.sub(r'(<MPD[^>]*>)', r'\1\n<BaseURL>' + base_url + '</BaseURL>', body, count=1)
-
-        kid_clean = drm_kid.replace('-', '').replace(' ', '')
-        if len(kid_clean) == 32:
-            kid_uuid = f"{kid_clean[:8]}-{kid_clean[8:12]}-{kid_clean[12:16]}-{kid_clean[16:20]}-{kid_clean[20:32]}"
-            # DON'T strip existing ContentProtection (PlayReady/Widevine) -
-            # keep them so native PlayReady works on Windows.
-            # Just inject ClearKey as an additional option for non-Windows.
-            if '1077efec' not in body:
-                clearkey_xml = f'''<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b" value="ClearKey">
-<cenc:default_KID>{kid_uuid}</cenc:default_KID>
-</ContentProtection>'''
-                body = re.sub(r'(<AdaptationSet)', clearkey_xml + r'\1', body, count=1)
-                body = re.sub(r'(<MPD)([^>]*>)', lambda m: m.group(1) + (' xmlns:cenc="urn:mpeg:cenc:2013"' if 'xmlns:cenc=' not in m.group(2) else '') + m.group(2), body, count=1)
+    if '.mpd' in url:
+        # Rewrite BaseURL to proxy so segments also get proper headers (Referer, X-LSP-Enc, etc.)
+        proxy_base = request.host_url.rstrip('/') + '/proxy/hls/' + slug + '/' + str(idx) + '/?url='
+        body = re.sub(r'<BaseURL[^>]*>[^<]*</BaseURL>', '', body)
+        body = re.sub(r'(<MPD[^>]*>)', r'\1\n<BaseURL>' + proxy_base + '</BaseURL>', body, count=1)
 
     return Response(body, content_type='application/dash+xml')
 
