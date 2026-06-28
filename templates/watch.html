@@ -655,8 +655,20 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var slug = '{{ slug }}';
   var player = null;
   var activeIdx = -1;
+  var fallbackTried = {};
   var L = function(msg) { try { console.log('[ZL]', msg); } catch(_) {} };
   L('init streams=' + (streams ? streams.length : 'null') + ' dashjs=' + (typeof dashjs!=='undefined') + ' hlsjs=' + (typeof Hls!=='undefined'));
+
+  function tryNext(idx){
+    var next=idx+1;
+    while(next<(streams||[]).length){
+      if(!fallbackTried[next]){fallbackTried[next]=true;loadStream(next);return true;}
+      next++;
+    }
+    showPlaceholder('All streams unavailable');
+    spinner.classList.add('hidden');
+    return false;
+  }
 
   /* ---- Custom Player Controls ---- */
   var overlay = document.getElementById('playerOverlay');
@@ -937,6 +949,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   function loadStream(idx){
     L('loadStream('+idx+') called');
     destroyPlayer();
+    fallbackTried={};
     serverRow.querySelectorAll('.srv-btn').forEach(function(b){b.classList.remove('active');});
     var targetBtn=serverRow.querySelector('.srv-btn[data-idx="'+idx+'"]');
     if(targetBtn)targetBtn.classList.add('active');
@@ -975,14 +988,12 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           if(dashPlayer.isDynamic&&dashPlayer.isDynamic())setLiveMode(true);
         });
         dashPlayer.on(dashjs.MediaPlayer.events.ERROR,function(e){
-          showPlaceholder('Stream unavailable — try another server');
-          spinner.classList.add('hidden');
+          tryNext(activeIdx);
         });
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
           showVideo();
-          url='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
           var hls=new Hls({
             enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
             backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1
@@ -998,11 +1009,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           });
           hls.on(Hls.Events.ERROR,function(e,data){
             if(data.fatal){
-              var msg='Stream error';
-              if(data.response&&data.response.code)msg+=' (HTTP '+data.response.code+')';
-              else if(data.type==='networkError')msg+=' (network error)';
-              showPlaceholder(msg+' — try another server');
-              spinner.classList.add('hidden');
+              tryNext(activeIdx);
             }
           });
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
