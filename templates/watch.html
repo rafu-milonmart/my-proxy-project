@@ -622,10 +622,13 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   {% endif %}
 
   <div class="server-section">
-    <div class="section-top">
-      <div class="section-label">Stream Servers</div>
-      <a href="/playlist/{{ slug }}.m3u" class="dl-m3u" download>Download M3U</a>
-    </div>
+      <div class="section-top">
+        <div class="section-label">Stream Servers</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="dl-m3u" id="vlcBtn" style="border-color:rgba(255,117,24,.25);color:#ff7518">VLC</button>
+          <a href="/playlist/{{ slug }}.m3u" class="dl-m3u" download>M3U</a>
+        </div>
+      </div>
     <div class="row" id="serverRow">
       {% for s in streams %}
       <button class="srv-btn" data-idx="{{ loop.index0 }}">{{ s.get('label', 'Server ' ~ loop.index0) }}</button>
@@ -972,6 +975,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(typeof dashjs==='undefined'){showPlaceholder('Dash.js failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
         var dashPlayer=dashjs.MediaPlayer().create();
+        dashPlayer.updateSettings({
+          streaming:{protection:{useNativeMediaKeys:false}}
+        });
         if(drmKid&&drmKey){
           var p={'org.w3.clearkey':{'clearkeys':{}}};
           p['org.w3.clearkey']['clearkeys'][drmKid]=drmKey;
@@ -1096,6 +1102,25 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     el.addEventListener('click',function(e){e.stopPropagation();applyTheme(this.dataset.theme);themePanel.classList.remove('open');});
   });
   document.addEventListener('click',function(){themePanel.classList.remove('open');});
+
+  /* ---- Open in VLC ---- */
+  document.getElementById('vlcBtn').addEventListener('click',function(){
+    var m3uUrl = window.location.origin + '/playlist/' + slug + '.m3u';
+    var vlcUrl = 'vlc://' + m3uUrl;
+    L('VLC: trying ' + vlcUrl);
+    var timer = setTimeout(function() {
+      if (document.hidden) return;
+      if (confirm('VLC is not installed on this device.\n\nWould you like to download VLC from videolan.org?')) {
+        window.open('https://www.videolan.org/', '_blank');
+      }
+    }, 2500);
+    function onVis() {
+      if (document.hidden) { clearTimeout(timer); L('VLC launched'); }
+      document.removeEventListener('visibilitychange', onVis);
+    }
+    document.addEventListener('visibilitychange', onVis);
+    window.location.href = vlcUrl;
+  });
 })();
 </script>
 </body>
