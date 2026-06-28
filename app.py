@@ -27,6 +27,11 @@ _http_headers = {
     "X-Requested-With": "lsp",
     "X-LSP-Enc": "1",
 }
+_media_headers = {
+    "Accept": "*/*",
+    "Referer": UPSTREAM + "/",
+    "Origin": UPSTREAM,
+}
 _tlocal = threading.local()
 
 
@@ -34,6 +39,12 @@ def get_http():
     if not hasattr(_tlocal, "session"):
         _tlocal.session = curl_requests.Session(headers=_http_headers, impersonate="chrome124", timeout=15)
     return _tlocal.session
+
+
+def get_media_http():
+    if not hasattr(_tlocal, "media_session"):
+        _tlocal.media_session = curl_requests.Session(headers=_media_headers, impersonate="chrome124", timeout=30)
+    return _tlocal.media_session
 
 
 def http_get(url: str) -> tuple[int, str]:
@@ -288,22 +299,34 @@ def proxy_hls(slug, idx):
         base_dir = base_url[:base_url.rfind('/') + 1]
         target = urljoin(base_dir, target)
 
-    try:
-        r = get_http().get(target)
-        if r.status_code != 200:
-            return jsonify({"error": f"Upstream returned {r.status_code}"}), 502
+    http = get_media_http()
+    resp = None
+    for attempt in range(2):
+        try:
+            resp = http.get(target)
+            if resp.status_code == 200:
+                break
+            logging.warning(f"proxy_hls attempt {attempt+1} got {resp.status_code} for {target[:80]}")
+            if attempt == 0:
+                time.sleep(1)
+        except Exception as e:
+            logging.warning(f"proxy_hls attempt {attempt+1} failed: {e}")
+            if attempt == 0:
+                time.sleep(1)
+            continue
+    else:
+        code = resp.status_code if resp is not None else 'connection failed'
+        return jsonify({"error": f"Upstream returned {code}"}), 502
 
-        text = r.text
-        is_playlist = '.m3u8' in target or text.startswith('#EXTM3U') or text.startswith('#EXT-X-')
+    text = resp.text
+    is_playlist = '.m3u8' in target or text.startswith('#EXTM3U') or text.startswith('#EXT-X-')
 
-        if is_playlist:
-            base_dir = target[:target.rfind('/') + 1]
-            body = _hls_rewrite(text, base_dir, slug, idx)
-            return Response(body, content_type='application/vnd.apple.mpegurl')
-        else:
-            return Response(r.content, content_type=r.headers.get('content-type', 'application/octet-stream'))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if is_playlist:
+        base_dir = target[:target.rfind('/') + 1]
+        body = _hls_rewrite(text, base_dir, slug, idx)
+        return Response(body, content_type='application/vnd.apple.mpegurl')
+    else:
+        return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
 
 
 @app.route('/proxy/manifest/<slug>/<int:idx>')
@@ -320,9 +343,14 @@ def proxy_manifest(slug, idx):
     drm_kid = s.get('drm_kid', '')
     drm_key = s.get('drm_key', '')
 
-    st, body = http_get(url)
-    if st != 200:
-        return jsonify({"error": "Could not fetch manifest"}), 502
+    http = get_media_http()
+    try:
+        r = http.get(url)
+        if r.status_code != 200:
+            return jsonify({"error": f"Could not fetch manifest, upstream returned {r.status_code}"}), 502
+        body = r.text
+    except Exception as e:
+        return jsonify({"error": f"Could not fetch manifest: {e}"}), 502
 
     if drm_kid and drm_key and '.mpd' in url:
         base_url = url[:url.rfind('/') + 1]

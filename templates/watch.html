@@ -992,6 +992,15 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
             qualityGroup.style.display='inline-flex';
             if(hls.live)setLiveMode(true);
           });
+          hls.on(Hls.Events.ERROR,function(e,data){
+            if(data.fatal){
+              var msg='Stream error';
+              if(data.response&&data.response.code)msg+=' (HTTP '+data.response.code+')';
+              else if(data.type==='networkError')msg+=' (network error)';
+              showPlaceholder(msg+' — try another server');
+              spinner.classList.add('hidden');
+            }
+          });
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
           showVideo();video.src=url;startPlay();
         }else{
