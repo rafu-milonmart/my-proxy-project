@@ -126,6 +126,113 @@
   --glow:0 0 30px var(--accent-glow);
   --surface:var(--bg-card);
 }
+[data-theme="cyberpunk"]{
+  --bg:#0a0a14;
+  --bg-elevated:#12101e;
+  --bg-card:#1a1630;
+  --bg-hover:#242048;
+  --accent:#ff2d95;
+  --accent-glow:rgba(255,45,149,.3);
+  --accent-dim:rgba(255,45,149,.1);
+  --text:#f0e6ff;
+  --text-secondary:#c0a8d8;
+  --text-tertiary:#8070a0;
+  --line:rgba(255,45,149,.12);
+  --line-strong:rgba(255,45,149,.2);
+  --live:#00f5ff;
+  --live-dim:rgba(0,245,255,.12);
+  --shadow:0 2px 20px rgba(0,0,0,.5);
+  --overlay:rgba(0,0,0,.7);
+  --overlay-light:rgba(0,0,0,.35);
+  --glow:0 0 30px rgba(255,45,149,.25);
+  --surface:var(--bg-card);
+}
+[data-theme="cyberpunk"] body{background:linear-gradient(135deg,#0a0a14,#1a0a1e,#0a0a14)}
+[data-theme="sunset"]{
+  --bg:#12080a;
+  --bg-elevated:#1a0c0e;
+  --bg-card:#241016;
+  --bg-hover:#341a22;
+  --accent:#ff6b35;
+  --accent-glow:rgba(255,107,53,.3);
+  --accent-dim:rgba(255,107,53,.1);
+  --text:#fff0e8;
+  --text-secondary:#d4b0a0;
+  --text-tertiary:#a07868;
+  --line:rgba(255,107,53,.12);
+  --line-strong:rgba(255,107,53,.2);
+  --live:#f43f5e;
+  --live-dim:rgba(244,63,94,.12);
+  --shadow:0 2px 20px rgba(0,0,0,.5);
+  --overlay:rgba(0,0,0,.7);
+  --overlay-light:rgba(0,0,0,.35);
+  --glow:0 0 30px rgba(255,107,53,.25);
+  --surface:var(--bg-card);
+}
+[data-theme="sunset"] body{background:linear-gradient(135deg,#12080a,#1a0a18,#12080a)}
+[data-theme="nord"]{
+  --bg:#0d121a;
+  --bg-elevated:#131a24;
+  --bg-card:#17222e;
+  --bg-hover:#202e3e;
+  --accent:#88c0d0;
+  --accent-glow:rgba(136,192,208,.25);
+  --accent-dim:rgba(136,192,208,.1);
+  --text:#eef4f8;
+  --text-secondary:#a0b8c8;
+  --text-tertiary:#688098;
+  --line:rgba(136,192,208,.12);
+  --line-strong:rgba(136,192,208,.2);
+  --live:#bf616a;
+  --live-dim:rgba(191,97,106,.12);
+  --shadow:0 2px 20px rgba(0,0,0,.4);
+  --overlay:rgba(0,0,0,.65);
+  --overlay-light:rgba(0,0,0,.35);
+  --glow:0 0 30px var(--accent-glow);
+  --surface:var(--bg-card);
+}
+[data-theme="matrix"]{
+  --bg:#080c08;
+  --bg-elevated:#0c120c;
+  --bg-card:#101a10;
+  --bg-hover:#182818;
+  --accent:#00ff41;
+  --accent-glow:rgba(0,255,65,.3);
+  --accent-dim:rgba(0,255,65,.08);
+  --text:#d0ffd0;
+  --text-secondary:#70b070;
+  --text-tertiary:#306830;
+  --line:rgba(0,255,65,.1);
+  --line-strong:rgba(0,255,65,.18);
+  --live:#ff3355;
+  --live-dim:rgba(255,51,85,.12);
+  --shadow:0 2px 20px rgba(0,0,0,.6);
+  --overlay:rgba(0,0,0,.75);
+  --overlay-light:rgba(0,0,0,.4);
+  --glow:0 0 30px var(--accent-glow);
+  --surface:var(--bg-card);
+}
+[data-theme="midnight"]{
+  --bg:#080814;
+  --bg-elevated:#0e0e1e;
+  --bg-card:#14142a;
+  --bg-hover:#1e1e3e;
+  --accent:#6366f1;
+  --accent-glow:rgba(99,102,241,.3);
+  --accent-dim:rgba(99,102,241,.1);
+  --text:#e8e6ff;
+  --text-secondary:#a0a0d0;
+  --text-tertiary:#606090;
+  --line:rgba(99,102,241,.12);
+  --line-strong:rgba(99,102,241,.2);
+  --live:#f59e0b;
+  --live-dim:rgba(245,158,11,.12);
+  --shadow:0 2px 20px rgba(0,0,0,.5);
+  --overlay:rgba(0,0,0,.7);
+  --overlay-light:rgba(0,0,0,.35);
+  --glow:0 0 30px var(--accent-glow);
+  --surface:var(--bg-card);
+}
 
 html{scroll-behavior:smooth}
 body{
@@ -375,8 +482,10 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   animation:spin .8s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
+
 @keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
 
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .player-placeholder{
   position:absolute;inset:0;z-index:2;
   display:flex;align-items:center;justify-content:center;
@@ -1098,22 +1207,28 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   /* ---- Open in VLC ---- */
   document.getElementById('vlcBtn').addEventListener('click',function(){
-    var m3uUrl = window.location.origin + '/playlist/' + slug + '.m3u';
-    var vlcUrl = 'vlc://' + m3uUrl;
-    L('VLC: trying ' + vlcUrl);
-    var timer = setTimeout(function() {
-      if (document.hidden) return;
-      if (confirm('VLC is not installed on this device.\n\nWould you like to download VLC from videolan.org?')) {
-        window.open('https://www.videolan.org/', '_blank');
-      }
-    }, 2500);
-    function onVis() {
-      if (document.hidden) { clearTimeout(timer); L('VLC launched'); }
-      document.removeEventListener('visibilitychange', onVis);
-    }
-    document.addEventListener('visibilitychange', onVis);
-    window.location.href = vlcUrl;
+    var a = document.createElement('a');
+    a.href = window.location.origin + '/playlist/' + slug + '.m3u';
+    a.download = slug + '.m3u';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Downloaded! Open the .m3u file with VLC Media Player.');
   });
+
+  function showToast(msg) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    Object.assign(t.style, {
+      position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',
+      background:'rgba(0,0,0,.85)',color:'#fff',padding:'12px 24px',
+      borderRadius:'10px',fontSize:'14px',zIndex:'9999',
+      backdropFilter:'blur(10px)',border:'1px solid rgba(255,255,255,.1)',
+      animation:'fadeIn .3s ease-out'
+    });
+    document.body.appendChild(t);
+    setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .4s';setTimeout(function(){t.remove();},500);},4000);
+  }
 })();
 </script>
 </body>

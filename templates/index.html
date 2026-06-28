@@ -43,10 +43,17 @@ body{
 body::before{
   content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   background:
-    radial-gradient(ellipse 40% 50% at 20% 10%,rgba(255,45,85,.08),transparent),
-    radial-gradient(ellipse 50% 60% at 80% 90%,rgba(121,54,247,.08),transparent),
-    radial-gradient(ellipse 30% 30% at 50% 50%,rgba(255,45,85,.03),transparent);
+    radial-gradient(ellipse 40% 50% at 20% 10%,rgba(255,45,85,.09),transparent),
+    radial-gradient(ellipse 50% 60% at 80% 90%,rgba(121,54,247,.09),transparent),
+    radial-gradient(ellipse 30% 30% at 50% 50%,rgba(255,45,85,.04),transparent);
   animation:bgShift 20s ease-in-out infinite;
+}
+body::after{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 80%,rgba(255,45,85,.04),transparent),
+    radial-gradient(ellipse 40% 60% at 90% 20%,rgba(121,54,247,.04),transparent);
+  animation:bgShift2 25s ease-in-out infinite;
 }
 
 @keyframes bgShift{
@@ -54,14 +61,22 @@ body::before{
   33%{transform:translate(2%,-1%)}
   66%{transform:translate(-1%,2%)}
 }
+@keyframes bgShift2{
+  0%,100%{transform:translate(0,0) rotate(0deg)}
+  25%{transform:translate(-2%,2%) rotate(3deg)}
+  50%{transform:translate(1%,-1%) rotate(-2deg)}
+  75%{transform:translate(-1%,-2%) rotate(4deg)}
+}
 
 .orb{
   position:fixed;border-radius:50%;pointer-events:none;z-index:0;
-  filter:blur(80px);animation:orbFloat 15s ease-in-out infinite;
+  filter:blur(80px);animation:orbFloat 12s ease-in-out infinite;
 }
 .orb-1{width:400px;height:400px;background:rgba(255,45,85,.12);top:-100px;right:-100px;animation-delay:0s}
-.orb-2{width:350px;height:350px;background:rgba(121,54,247,.10);bottom:-80px;left:-80px;animation-delay:-5s}
-.orb-3{width:300px;height:300px;background:rgba(255,45,85,.06);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:-10s}
+.orb-2{width:350px;height:350px;background:rgba(121,54,247,.10);bottom:-80px;left:-80px;animation-delay:-4s}
+.orb-3{width:300px;height:300px;background:rgba(255,45,85,.06);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:-8s}
+.orb-4{width:250px;height:250px;background:rgba(255,45,85,.04);top:20%;left:80%;animation-delay:-2s}
+.orb-5{width:200px;height:200px;background:rgba(121,54,247,.05);bottom:30%;right:70%;animation-delay:-6s}
 
 @keyframes orbFloat{
   0%,100%{transform:translate(0,0) scale(1)}
@@ -234,11 +249,24 @@ img{max-width:100%;display:block}
   background:linear-gradient(135deg,rgba(121,54,247,.04),transparent 60%);
   pointer-events:none;
 }
+.event-card::after{
+  content:'';position:absolute;inset:0;border-radius:var(--radius);
+  opacity:0;transition:opacity .5s;
+  background:linear-gradient(135deg,rgba(255,45,85,.02),rgba(121,54,247,.02),transparent 60%);
+  background-size:200% 200%;
+  animation:cardShimmer 4s ease-in-out infinite;
+  pointer-events:none;
+}
 .event-card:hover{
   border-color:var(--line-hover);transform:translateY(-4px);
   box-shadow:var(--shadow),0 0 0 1px rgba(121,54,247,.08);
 }
 .event-card:hover::before{opacity:1}
+.event-card:hover::after{opacity:1}
+@keyframes cardShimmer{
+  0%,100%{background-position:0% 0%}
+  50%{background-position:100% 100%}
+}
 .event-card.live{border-color:rgba(255,45,85,.2)}
 .event-card.live:hover{border-color:rgba(255,45,85,.4);box-shadow:var(--shadow),0 0 0 1px rgba(255,45,85,.08)}
 .event-card.starting-soon{border-color:rgba(250,204,21,.15)}
@@ -349,6 +377,7 @@ img{max-width:100%;display:block}
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes statusPulse{0%,100%{opacity:1}50%{opacity:.65}}
 
 .empty-state{grid-column:1/-1;text-align:center;padding:60px 24px;color:var(--text-secondary)}
@@ -384,6 +413,8 @@ img{max-width:100%;display:block}
 <div class="orb orb-1"></div>
 <div class="orb orb-2"></div>
 <div class="orb orb-3"></div>
+<div class="orb orb-4"></div>
+<div class="orb orb-5"></div>
 
 <header class="header">
   <div class="header-inner">
@@ -586,21 +617,28 @@ img{max-width:100%;display:block}
   },60000);
 
   window.openInVLC = function(slug) {
-    var m3uUrl = window.location.origin + '/playlist/' + encodeURIComponent(slug) + '.m3u';
-    var vlcUrl = 'vlc://' + m3uUrl;
-    var timer = setTimeout(function() {
-      if (document.hidden) return;
-      if (confirm('VLC is not installed on this device.\n\nWould you like to download VLC from videolan.org?')) {
-        window.open('https://www.videolan.org/', '_blank');
-      }
-    }, 2500);
-    function onVis() {
-      if (document.hidden) { clearTimeout(timer); }
-      document.removeEventListener('visibilitychange', onVis);
-    }
-    document.addEventListener('visibilitychange', onVis);
-    window.location.href = vlcUrl;
+    var a = document.createElement('a');
+    a.href = window.location.origin + '/playlist/' + encodeURIComponent(slug) + '.m3u';
+    a.download = slug + '.m3u';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Downloaded! Open the .m3u file with VLC Media Player.');
   };
+
+  function showToast(msg) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    Object.assign(t.style, {
+      position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',
+      background:'rgba(0,0,0,.85)',color:'#fff',padding:'12px 24px',
+      borderRadius:'10px',fontSize:'14px',zIndex:'9999',
+      backdropFilter:'blur(10px)',border:'1px solid rgba(255,255,255,.1)',
+      animation:'fadeIn .3s ease-out'
+    });
+    document.body.appendChild(t);
+    setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .4s';setTimeout(function(){t.remove();},500);},4000);
+  }
 })();
 </script>
 </body>
