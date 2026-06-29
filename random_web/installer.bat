@@ -12,8 +12,9 @@ set INSTALL_DIR=C:\Zero_live
 set PYTHON_DIR=%INSTALL_DIR%\python
 set PYTHON_VERSION=3.12.5
 
-REM Check if already installed
-if /I "%~dp0"=="%INSTALL_DIR%\" goto :already_there
+REM Always download fresh from GitHub (installer runs from Downloads folder)
+set GITHUB_REPO=https://github.com/rafu-milonmart/my-proxy-project
+set ZIP_URL=%GITHUB_REPO%/archive/master.zip
 
 REM Step 1: Download portable Python
 echo [1/6] Setting up portable Python...
@@ -55,19 +56,28 @@ REM Show Python version
 %PYTHON_DIR%\python.exe --version
 echo.
 
-REM Step 2: Copy app files to C:\Zero_live
-echo [2/6] Copying app files to %INSTALL_DIR%...
+REM Step 2: Download app files from GitHub
+echo [2/6] Downloading app files from GitHub...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-xcopy /E /Y /Q "%~dp0." "%INSTALL_DIR%\" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to copy files. Try running as Administrator.
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile '%TEMP%\zero_live.zip'}"
+if !errorlevel! neq 0 (
+    echo [ERROR] Failed to download app files. Check your internet.
     pause
     exit /b 1
 )
-echo   Files copied.
+echo   Extracting...
+powershell -Command "Expand-Archive -Path '%TEMP%\zero_live.zip' -DestinationPath '%TEMP%\zero_live_extracted' -Force"
+if exist "%TEMP%\zero_live_extracted\my-proxy-project-master" (
+    xcopy /E /Y /Q "%TEMP%\zero_live_extracted\my-proxy-project-master\." "%INSTALL_DIR%\" >nul 2>&1
+) else (
+    xcopy /E /Y /Q "%TEMP%\zero_live_extracted\." "%INSTALL_DIR%\" >nul 2>&1
+)
+echo   App files downloaded.
+REM Cleanup temp files
+del "%TEMP%\zero_live.zip" >nul 2>&1
+rmdir /S /Q "%TEMP%\zero_live_extracted" >nul 2>&1
 echo.
 
-:already_there
 cd /d "%INSTALL_DIR%"
 
 REM Use portable Python
