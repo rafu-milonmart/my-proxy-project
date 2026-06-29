@@ -95,6 +95,9 @@ if exist "%TEMP%\zero_live_extracted\my-proxy-project-master" (
     xcopy /E /Y /Q "%TEMP%\zero_live_extracted\." "%INSTALL_DIR%\" >nul 2>&1
 )
 echo   App files downloaded.
+REM Write version file for update check
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'https://api.github.com/repos/rafu-milonmart/my-proxy-project/commits/master' -UseBasicParsing | ConvertFrom-Json; Write-Output $r.sha } catch { Write-Output '0' }" > "%INSTALL_DIR%\version.txt"
+echo.
 REM Cleanup temp files
 del "%TEMP%\zero_live.zip" >nul 2>&1
 rmdir /S /Q "%TEMP%\zero_live_extracted" >nul 2>&1
