@@ -1,5 +1,5 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading
-from urllib.parse import urlparse, urljoin, quote
+from urllib.parse import urlparse, urljoin
 from pathlib import Path
 from flask import Flask, send_from_directory, Response, request, jsonify, render_template
 from curl_cffi import requests as curl_requests
@@ -272,8 +272,9 @@ def proxy_api(subpath):
 def _hls_rewrite(body, base_dir, slug, idx):
     def rw(line_url):
         p = urlparse(line_url)
-        abs_url = line_url if p.netloc else urljoin(base_dir, line_url)
-        return '/proxy/hls/' + slug + '/' + str(idx) + '/?url=' + quote(abs_url, safe='')
+        if p.netloc:
+            return line_url
+        return urljoin(base_dir, line_url)
 
     lines = body.split('\n')
     out = []
