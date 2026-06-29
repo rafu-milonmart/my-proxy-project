@@ -40,9 +40,8 @@ if !errorlevel! neq 0 (
 )
 
 REM Enable site-packages in embedded Python (required for pip)
-set "PTH_FILE=%PYTHON_DIR%\python._pth"
-if exist "!PTH_FILE!" (
-    powershell -Command "(Get-Content '!PTH_FILE!') -replace '#import site','import site' | Set-Content '!PTH_FILE!'"
+for %%f in ("%PYTHON_DIR%\python*._pth") do (
+    powershell -Command "(Get-Content '%%f') -replace '#import site','import site' | Set-Content '%%f'"
 )
 
 REM Download and install pip via get-pip.py
