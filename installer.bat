@@ -55,13 +55,19 @@ if !errorlevel! equ 0 (
         "%PYTHON_DIR%\python.exe" "!GET_PIP!" --no-setuptools --no-wheel --trusted-host pypi.org --trusted-host files.pythonhosted.org
     )
 )
+REM Try pip via -m, fallback to direct path
 "%PYTHON_DIR%\python.exe" -m pip --version >nul 2>&1
 if !errorlevel! neq 0 (
-    echo [ERROR] pip still not available after all attempts.
-    echo   See "%TEMP%\get-pip.log" for details.
-    dir "%PYTHON_DIR%"
-    pause
-    exit /b 1
+    echo   [WARN] python -m pip not working, trying direct pip path...
+    if exist "%PYTHON_DIR%\Scripts\pip.exe" (
+        echo   Found pip at Scripts\pip.exe
+    ) else (
+        echo [ERROR] pip.exe not found in Scripts directory.
+        dir "%PYTHON_DIR%"
+        dir "%PYTHON_DIR%\Scripts" 2>nul
+        pause
+        exit /b 1
+    )
 )
 echo   Python + pip ready.
 :python_done
@@ -107,7 +113,7 @@ if not exist "requirements.txt" (
     pause
     exit /b 1
 )
-%PYTHON% -m pip install -r requirements.txt
+"%PYTHON_DIR%\Scripts\pip.exe" install -r requirements.txt
 if !errorlevel! neq 0 (
     echo [ERROR] Failed to install dependencies.
     pause

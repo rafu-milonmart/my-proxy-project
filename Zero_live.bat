@@ -3,7 +3,9 @@ cd /d "%~dp0"
 title ZeroLive
 setlocal enabledelayedexpansion
 
-set PYTHON=%~dp0python\python.exe
+set PYTHON_DIR=%~dp0python
+set PYTHON=%PYTHON_DIR%\python.exe
+set PIP=%PYTHON_DIR%\Scripts\pip.exe
 
 if not exist "%PYTHON%" (
     echo [ERROR] Python not found. Run installer.bat first.
@@ -27,7 +29,7 @@ if !errorlevel! equ 0 (
             git pull origin master
             if !errorlevel! equ 0 (
                 echo Updates applied! Restarting...
-                "%PYTHON%" -m pip install -r requirements.txt --quiet
+                "%PIP%" install -r requirements.txt --quiet
             ) else (
                 echo [WARNING] Update failed. Starting with current version.
             )
