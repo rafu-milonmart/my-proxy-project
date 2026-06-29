@@ -7,3 +7,4 @@ __pycache__/
 !installer.bat
 !run.bat
 !uninstall.bat
+random_web/
