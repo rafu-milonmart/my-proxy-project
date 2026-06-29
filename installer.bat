@@ -16,31 +16,56 @@ REM Always download fresh from GitHub (installer runs from Downloads folder)
 set GITHUB_REPO=https://github.com/rafu-milonmart/my-proxy-project
 set ZIP_URL=%GITHUB_REPO%/archive/master.zip
 
-REM Step 1: Download and install full Python
+REM Step 1: Install Python
 echo [1/5] Setting up Python...
-if not exist "%PYTHON_DIR%\python.exe" (
-    echo   Downloading Python %PYTHON_VERSION% full installer...
-    set PYTHON_INSTALLER=%TEMP%\python-%PYTHON_VERSION%-amd64.exe
-    if not exist "!PYTHON_INSTALLER!" (
-        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-amd64.exe' -OutFile '%TEMP%\python-%PYTHON_VERSION%-amd64.exe'}"
-        if !errorlevel! neq 0 (
-            echo [ERROR] Failed to download Python installer. Check your internet.
-            pause
-            exit /b 1
-        )
-    )
-    echo   Installing Python to %PYTHON_DIR%...
-    if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
-    start /wait "" "!PYTHON_INSTALLER!" InstallAllUsers=0 Include_launcher=0 PrependPath=0 TargetDir="%PYTHON_DIR%" /quiet >nul 2>&1
+if exist "%PYTHON_DIR%\python.exe" goto :python_done
+
+echo   Downloading Python %PYTHON_VERSION%...
+set PYTHON_ZIP=%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip
+if not exist "!PYTHON_ZIP!" (
+    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-embed-amd64.zip' -OutFile '!PYTHON_ZIP!'}"
     if !errorlevel! neq 0 (
-        echo [ERROR] Python installer failed with code !errorlevel!.
+        echo [ERROR] Failed to download Python. Check your internet.
         pause
         exit /b 1
     )
-    echo   Python installed.
-) else (
-    echo   Python already installed.
 )
+echo   Extracting...
+if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
+powershell -Command "Expand-Archive -Path '!PYTHON_ZIP!' -DestinationPath '%PYTHON_DIR%' -Force"
+if !errorlevel! neq 0 (
+    echo [ERROR] Failed to extract Python.
+    pause
+    exit /b 1
+)
+
+REM Enable site-packages in embedded Python (required for pip)
+set "PTH_FILE=%PYTHON_DIR%\python._pth"
+if exist "!PTH_FILE!" (
+    powershell -Command "(Get-Content '!PTH_FILE!') -replace '#import site','import site' | Set-Content '!PTH_FILE!'"
+)
+
+REM Download and install pip via get-pip.py
+echo   Installing pip...
+set GET_PIP=%TEMP%\get-pip.py
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '!GET_PIP!'}"
+if !errorlevel! equ 0 (
+    "%PYTHON_DIR%\python.exe" "!GET_PIP!" --no-setuptools --no-wheel
+    if !errorlevel! neq 0 (
+        echo   [WARN] get-pip.py had issues. Trying --trusted-host...
+        "%PYTHON_DIR%\python.exe" "!GET_PIP!" --no-setuptools --no-wheel --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    )
+)
+"%PYTHON_DIR%\python.exe" -m pip --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo [ERROR] pip still not available after all attempts.
+    echo   See "%TEMP%\get-pip.log" for details.
+    dir "%PYTHON_DIR%"
+    pause
+    exit /b 1
+)
+echo   Python + pip ready.
+:python_done
 echo.
 
 REM Show Python version
