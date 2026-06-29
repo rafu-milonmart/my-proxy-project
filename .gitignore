@@ -5,6 +5,6 @@ __pycache__/
 .DS_Store
 *.bat
 !installer.bat
-!run.bat
+!Zero_live.bat
 !uninstall.bat
 random_web/

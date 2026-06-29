@@ -99,7 +99,7 @@ set RUN_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive.lnk
 set UNINSTALL_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive Uninstall.lnk
 
 if not exist "%RUN_SHORTCUT%" (
-    powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%RUN_SHORTCUT%');$s.TargetPath='%INSTALL_DIR%\run.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='ZeroLive - Free Sports Streaming';$s.Save()"
+    powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%RUN_SHORTCUT%');$s.TargetPath='%INSTALL_DIR%\Zero_live.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='ZeroLive - Free Sports Streaming';$s.Save()"
     if !errorlevel! equ 0 ( echo   "ZeroLive" shortcut created on desktop. ) else ( echo   [WARN] Could not create run shortcut. )
 ) else (
     echo   Run shortcut already exists.
@@ -140,7 +140,7 @@ echo   S      - Speed menu
 echo   Arrows - Seek / Volume
 echo.
 echo TROUBLESHOOTING:
-echo - If the app doesn't start, run run.bat manually
+echo - If the app doesn't start, run Zero_live.bat manually
 echo - Firewall alert is normal - allow access
 echo - For VLC: use the M3U link from the app
 echo.
