@@ -241,7 +241,7 @@ def event_playlist_m3u(slug):
     if not result or 'streams' not in result:
         return Response("#EXTM3U\n", mimetype='audio/x-mpegurl')
     for i, s in enumerate(result['streams']):
-        label = s.get('label', f'Server {i}')
+        label = f'LIVE {i+1}'
         url = s.get('stream_url', '')
         if url:
             lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{label}",{label}')

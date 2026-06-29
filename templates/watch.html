@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>{{ event.team_a_name if event else slug }} vs {{ event.team_b_name if event else 'Stream' }} - ZeroLive</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230B9444'/><text x='16' y='22' text-anchor='middle' fill='white' font-size='17' font-weight='bold'>Z</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='url(%23g)'/><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%23ff2d55'/><stop offset='100%25' stop-color='%237936f7'/></linearGradient></defs><text x='16' y='22' text-anchor='middle' fill='white' font-size='17' font-weight='bold'>Z</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20"></script>
 <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
@@ -592,6 +592,52 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
 .footer{text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px;margin-top:16px;border-top:1px solid var(--line)}
 
+/* Info overlay */
+.info-overlay{
+  display:none;position:fixed;inset:0;z-index:300;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
+  align-items:center;justify-content:center;
+}
+.info-overlay.open{display:flex}
+.info-content{
+  background:var(--bg-elevated);border:1px solid var(--line-strong);
+  border-radius:var(--radius);max-width:400px;width:90%;
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.info-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px;border-bottom:1px solid var(--line);
+  font-weight:600;font-size:14px;
+}
+.info-header button{
+  width:28px;height:28px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text-secondary);font-size:18px;transition:all .15s;
+}
+.info-header button:hover{background:var(--bg-hover);color:var(--text)}
+.info-body{padding:14px 16px;font-size:13px;line-height:1.6}
+.info-body .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)}
+.info-body .row:last-child{border-bottom:none}
+.info-body .label{color:var(--text-tertiary)}
+.info-body .value{color:var(--text);font-weight:500;text-align:right;word-break:break-all}
+
+/* Next match banner */
+.next-match{
+  margin-top:12px;position:relative;z-index:1;
+}
+.next-match-inner{
+  display:flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,var(--accent-dim),rgba(255,45,85,.06));
+  border:1px solid rgba(255,45,85,.15);border-radius:var(--radius);
+  padding:10px 16px;font-size:13px;
+}
+.next-label{
+  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--live);white-space:nowrap;
+}
+.next-link{color:var(--text);font-weight:600;transition:all .15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.next-link:hover{color:var(--accent)}
+
 /* === RESPONSIVE === */
 @media(max-width:900px){
   .match-team .logo-wrap{width:60px;height:60px}
@@ -660,6 +706,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <div class="theme-panel" id="themePanel">
         <button class="theme-opt active" data-theme="dark"><span class="swatch" style="background:#07080a;border-color:#333"></span>Dark</button>
         <button class="theme-opt" data-theme="light"><span class="swatch" style="background:#f5f7fa;border-color:#ddd"></span>Light</button>
+        <button class="theme-opt" data-theme="system"><span class="swatch" style="background:linear-gradient(135deg,#f5f7fa 50%,#07080a 50%);border-color:#777"></span>System</button>
         <button class="theme-opt" data-theme="green"><span class="swatch" style="background:#0d2412;border-color:#22d65e"></span>Green</button>
         <button class="theme-opt" data-theme="aero"><span class="swatch" style="background:linear-gradient(135deg,#0a0e17,#1a1f2e);border-color:#60a5fa"></span>Aero Glass</button>
         <button class="theme-opt" data-theme="blue"><span class="swatch" style="background:#111b30;border-color:#3b82f6"></span>Blue</button>
@@ -738,6 +785,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
                 <button data-speed="3">3x</button>
               </div>
             </div>
+            <button class="ctrl-btn" id="shareBtn" aria-label="Share" style="display:none">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+            </button>
             <button class="ctrl-btn" id="fullscreenBtn" aria-label="Fullscreen">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
             </button>
@@ -788,7 +838,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       </div>
     <div class="row" id="serverRow">
       {% for s in streams %}
-      <button class="srv-btn" data-idx="{{ loop.index0 }}">{{ s.get('label', 'Server ' ~ loop.index0) }}</button>
+      <button class="srv-btn" data-idx="{{ loop.index0 }}">LIVE {{ loop.index }}</button>
       {% endfor %}
     </div>
   </div>
@@ -800,6 +850,20 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     </div>
   </div>
 </main>
+
+<div class="info-overlay" id="infoOverlay">
+  <div class="info-content">
+    <div class="info-header"><span>Stream Info</span><button id="infoClose">&times;</button></div>
+    <div class="info-body" id="infoBody"></div>
+  </div>
+</div>
+
+<div class="next-match" id="nextMatch" style="display:none">
+  <div class="next-match-inner">
+    <span class="next-label">Next Live</span>
+    <a class="next-link" id="nextLink" href="#">→ <span id="nextTitle"></span></a>
+  </div>
+</div>
 
 <footer class="footer">ZeroLive &mdash; Free sports streaming</footer>
 
@@ -1124,6 +1188,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   function loadStream(idx){
     L('loadStream('+idx+') called');
+    lastProgress=Date.now();
     destroyPlayer();
     serverRow.querySelectorAll('.srv-btn').forEach(function(b){b.classList.remove('active');});
     var targetBtn=serverRow.querySelector('.srv-btn[data-idx="'+idx+'"]');
@@ -1251,15 +1316,22 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   {% endif %}
 
   /* ---- Theme ---- */
-  var themeNames={dark:'Dark',light:'Light',green:'Green',aero:'Aero Glass',blue:'Blue',cyberpunk:'Cyberpunk',sunset:'Sunset',nord:'Nord',matrix:'Matrix',midnight:'Midnight'};
-  var themeIcons={dark:'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>',light:'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',green:'<path d="M2 22L12 2l10 20H2z"/><circle cx="12" cy="16" r="2"/>',aero:'<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>',blue:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>',cyberpunk:'<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor"/>',sunset:'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2"/>',nord:'<path d="M12 2a10 10 0 000 20 10 10 0 000-20z"/><path d="M2 12h20"/>',matrix:'<path d="M2 22L12 2l10 20H2z"/>',midnight:'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/><circle cx="12" cy="8" r="1" fill="currentColor"/>'};
+  var themeNames={dark:'Dark',light:'Light',green:'Green',aero:'Aero Glass',blue:'Blue',cyberpunk:'Cyberpunk',sunset:'Sunset',nord:'Nord',matrix:'Matrix',midnight:'Midnight',system:'System'};
+  var themeIcons={dark:'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>',light:'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',green:'<path d="M2 22L12 2l10 20H2z"/><circle cx="12" cy="16" r="2"/>',aero:'<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>',blue:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>',cyberpunk:'<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor"/>',sunset:'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2"/>',nord:'<path d="M12 2a10 10 0 000 20 10 10 0 000-20z"/><path d="M2 12h20"/>',matrix:'<path d="M2 22L12 2l10 20H2z"/>',midnight:'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/><circle cx="12" cy="8" r="1" fill="currentColor"/>',system:'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/><circle cx="12" cy="12" r="5"/><path d="M2 12h20M12 2v20"/>'};
   var themeToggle=document.getElementById('themeToggle');
   var themeIcon=document.getElementById('themeIcon');
   var themeLabel=document.getElementById('themeLabel');
   var themePanel=document.getElementById('themePanel');
-  var currentTheme=localStorage.getItem('zl-theme')||'dark';
+  var currentTheme=localStorage.getItem('zl-theme')||'system';
+  var systemDarkQuery=window.matchMedia('(prefers-color-scheme:dark)');
+  function resolveTheme(t){
+    if(t==='system')return systemDarkQuery.matches?'dark':'light';
+    return t;
+  }
   function applyTheme(t){
-    document.documentElement.dataset.theme=t;
+    currentTheme=t;
+    var resolved=resolveTheme(t);
+    document.documentElement.dataset.theme=resolved;
     themeIcon.innerHTML=themeIcons[t]||themeIcons.dark;
     themeLabel.textContent=themeNames[t]||'Dark';
     localStorage.setItem('zl-theme',t);
@@ -1268,6 +1340,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     });
   }
   applyTheme(currentTheme);
+  systemDarkQuery.addEventListener('change',function(){applyTheme(currentTheme);});
   themeToggle.addEventListener('click',function(e){e.stopPropagation();themePanel.classList.toggle('open');});
   themePanel.querySelectorAll('.theme-opt').forEach(function(el){
     el.addEventListener('click',function(e){e.stopPropagation();applyTheme(this.dataset.theme);themePanel.classList.remove('open');});
@@ -1285,9 +1358,140 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     showToast('Downloaded! Open the .m3u file with VLC Media Player.');
   });
 
-  function showToast(msg) {
+  /* ---- Share Button ---- */
+  var shareBtn=document.getElementById('shareBtn');
+  if(navigator.share){
+    shareBtn.style.display='flex';
+    shareBtn.addEventListener('click',function(){
+      navigator.share({title:document.title,url:window.location.href})['catch'](function(){});
+    });
+  }else if(navigator.clipboard){
+    shareBtn.style.display='flex';
+    shareBtn.addEventListener('click',function(){
+      navigator.clipboard.writeText(window.location.href).then(function(){
+        showToast('Link copied to clipboard!');
+      })['catch'](function(){});
+    });
+  }
+
+  /* ---- Persistent Speed ---- */
+  var savedSpeed=localStorage.getItem('zl-speed');
+  if(savedSpeed){
+    try{
+      var sp=parseFloat(savedSpeed);
+      if(sp>0&&sp<=16){
+        video.playbackRate=sp;
+        speedDropdown.querySelectorAll('button').forEach(function(b){
+          var match=Math.abs(parseFloat(b.dataset.speed)-sp)<.01;
+          b.classList.toggle('active',match);
+          if(match)speedBtn.textContent=b.textContent;
+        });
+      }
+    }catch(_){}
+  }
+  speedDropdown.addEventListener('click',function(e){
+    var btn=e.target.closest('button');
+    if(!btn)return;
+    localStorage.setItem('zl-speed',btn.dataset.speed);
+  });
+
+  /* ---- Double-tap Fullscreen ---- */
+  var lastTap=0;
+  video.addEventListener('touchstart',function(e){
+    var now=Date.now();
+    if(now-lastTap<400&&e.touches.length===1){
+      e.preventDefault();
+      fullscreenBtn.click();
+      lastTap=0;
+    }else{
+      lastTap=now;
+    }
+  });
+
+  /* ---- Auto-fallback Mid-Playback (stall detection) ---- */
+  var stallTimer=null;
+  var lastProgress=0;
+  video.addEventListener('timeupdate',function(){
+    lastProgress=Date.now();
+  });
+  function checkStall(){
+    if(video.paused||!streams||!streams.length){stallTimer=setTimeout(checkStall,5000);return;}
+    if(activeIdx<0){stallTimer=setTimeout(checkStall,5000);return;}
+    var elapsed=Date.now()-lastProgress;
+    if(elapsed>15000&&video.readyState<3){
+      L('Stall detected, trying fallback');
+      if(!fallbackTried[activeIdx+1]){
+        tryNext(activeIdx);
+      }
+    }
+    stallTimer=setTimeout(checkStall,5000);
+  }
+  stallTimer=setTimeout(checkStall,5000);
+
+  /* ---- Stream Info Overlay ---- */
+  var infoOverlay=document.getElementById('infoOverlay');
+  var infoBody=document.getElementById('infoBody');
+  var infoClose=document.getElementById('infoClose');
+  function showInfo(){
+    var info=[];
+    info.push({label:'URL',value:streams[activeIdx]?streams[activeIdx].stream_url:'-'});
+    info.push({label:'Type',value:streams[activeIdx]?streams[activeIdx].stream_type||'-':'-'});
+    info.push({label:'Server',value:'LIVE '+(activeIdx+1)});
+    info.push({label:'Player',value:player?player.constructor.name:'none'});
+    if(video.duration&&isFinite(video.duration)){
+      info.push({label:'Duration',value:formatTime(video.duration)});
+    }
+    info.push({label:'Volume',value:Math.round((video.muted?0:video.volume)*100)+'%'});
+    info.push({label:'Speed',value:video.playbackRate+'x'});
+    infoBody.innerHTML=info.map(function(i){
+      return '<div class="row"><span class="label">'+i.label+'</span><span class="value">'+i.value+'</span></div>';
+    }).join('');
+    infoOverlay.classList.add('open');
+  }
+  infoClose.addEventListener('click',function(){infoOverlay.classList.remove('open');});
+  infoOverlay.addEventListener('click',function(e){if(e.target===infoOverlay)infoOverlay.classList.remove('open');});
+  /* Add keyboard shortcut 'I' for info */
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='INPUT')return;
+    if(e.code==='KeyI'&&!e.ctrlKey&&!e.metaKey){
+      e.preventDefault();
+      if(infoOverlay.classList.contains('open'))infoOverlay.classList.remove('open');
+      else showInfo();
+    }
+    if(e.code==='KeyS'&&!e.ctrlKey&&!e.metaKey){e.preventDefault();shareBtn.click();}
+  });
+
+  /* ---- Auto-watch Next Live Match ---- */
+  (function(){
+    fetch('/api/upstream/events',{cache:'no-store'}).then(function(r){return r.json();}).then(function(data){
+      var evs=(data&&Array.isArray(data.events))?data.events:(Array.isArray(data)?data:[]);
+      var live=evs.filter(function(e){return e.is_live===1;});
+      if(live.length>0){
+        var curSlug=slug;
+        var next=null;
+        for(var i=0;i<live.length;i++){
+          var s=live[i].enc_parent||live[i].parent||live[i].id;
+          if(s!==curSlug){next=live[i];break;}
+        }
+        if(!next)next=live[0];
+        if(next){
+          var ns=next.enc_parent||next.parent||next.id;
+          if(ns!==curSlug){
+            var el=document.getElementById('nextMatch');
+            document.getElementById('nextTitle').textContent=(next.team_a_name||'?')+' vs '+(next.team_b_name||'?');
+            document.getElementById('nextLink').href='/watch/'+encodeURIComponent(ns);
+            el.style.display='block';
+          }
+        }
+      }
+    })['catch'](function(){});
+  })();
+
+  /* ---- Improved Toast ---- */
+  function showToast(msg,icon) {
     var t = document.createElement('div');
-    t.textContent = msg;
+    if(icon)t.innerHTML=icon+' '+msg;
+    else t.textContent = msg;
     Object.assign(t.style, {
       position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',
       background:'rgba(0,0,0,.85)',color:'#fff',padding:'12px 24px',

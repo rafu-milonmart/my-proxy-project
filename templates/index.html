@@ -385,6 +385,34 @@ img{max-width:100%;display:block}
 .empty-state h3{font-size:17px;font-weight:600;color:var(--text);margin-bottom:6px}
 .empty-state p{font-size:13px}
 
+.howto{
+  position:relative;z-index:1;max-width:800px;margin:0 auto;padding:40px 24px 16px;
+}
+.howto-title{
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--text-tertiary);margin-bottom:16px;text-align:center;
+}
+.howto-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.howto-card{
+  background:var(--bg-card);border:1px solid var(--line);
+  border-radius:var(--radius);padding:16px;text-align:center;
+  transition:all .25s;
+}
+.howto-card:hover{border-color:var(--line-hover);transform:translateY(-2px)}
+.howto-card .icon{
+  width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent-1),var(--accent-2));
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 10px;font-size:16px;
+}
+.howto-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
+.howto-card p{font-size:11px;color:var(--text-secondary);line-height:1.4}
+
+.howto-bn{margin-top:0;padding-top:10px}
+.howto-bn .howto-title{color:var(--text-tertiary);opacity:.6}
+.howto-bn .howto-card h4{font-weight:500}
+.howto-bn .howto-card p{font-size:12px}
+
 .footer{
   position:relative;z-index:1;
   text-align:center;padding:28px 24px;
@@ -444,6 +472,78 @@ img{max-width:100%;display:block}
   <nav class="filter-bar" id="filterBar"></nav>
   <div id="eventsGrid"></div>
 </main>
+
+<section class="howto">
+  <div class="howto-title">How to Use</div>
+  <div class="howto-grid">
+    <div class="howto-card">
+      <div class="icon">1</div>
+      <h4>Browse Events</h4>
+      <p>Scroll through live and upcoming matches. Use the filter bar to sort by sport, or search by team or league name.</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">2</div>
+      <h4>Select a Server</h4>
+      <p>Click any event card to open the player. Pick a stream server (LIVE 1, LIVE 2, etc.) and the stream will start automatically.</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">3</div>
+      <h4>Customize Your View</h4>
+      <p>Use the player controls to adjust volume, quality, playback speed, or switch to fullscreen. Change the theme from the header menu.</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">4</div>
+      <h4>Watch on VLC / IPTV</h4>
+      <p>Download the M3U file for any event and open it in VLC Media Player, IPTV Smarters, TiviMate, or any IPTV app on any device.</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+      <h4>No Account Needed</h4>
+      <p>ZeroLive is completely free. No registration, no ads, no bullshit. Just click and watch.</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
+      <h4>Stream Issues?</h4>
+      <p>If a stream fails, the player auto-retries with the next available server. You can also manually switch servers at any time.</p>
+    </div>
+  </div>
+</section>
+
+<section class="howto howto-bn">
+  <div class="howto-title">ব্যবহারবিধি</div>
+  <div class="howto-grid">
+    <div class="howto-card">
+      <div class="icon">১</div>
+      <h4>ইভেন্ট ব্রাউজ করুন</h4>
+      <p>লাইভ এবং আসন্ন ম্যাচ দেখুন। স্পোর্ট অনুযায়ী ফিল্টার করুন বা টিম/লীগের নামে সার্চ করুন।</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">২</div>
+      <h4>সার্ভার নির্বাচন করুন</h4>
+      <p>যেকোনো ইভেন্ট কার্ডে ক্লিক করে প্লেয়ার খুলুন। একটি স্ট্রিম সার্ভার বেছে নিন (LIVE 1, LIVE 2, ইত্যাদি) এবং স্ট্রিম স্বয়ংক্রিয়ভাবে শুরু হবে।</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">৩</div>
+      <h4>ভিউ কাস্টমাইজ করুন</h4>
+      <p>প্লেয়ার কন্ট্রোল ব্যবহার করে ভলিউম, কোয়ালিটি, প্লেব্যাক স্পিড বা ফুলস্ক্রিনে সুইচ করুন। হেডার মেনু থেকে থিম পরিবর্তন করুন।</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon">৪</div>
+      <h4>VLC / IPTV তে দেখুন</h4>
+      <p>যেকোনো ইভেন্টের M3U ফাইল ডাউনলোড করে VLC, IPTV Smarters, TiviMate বা যেকোনো IPTV অ্যাপে খুলুন।</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+      <h4>কোনো অ্যাকাউন্ট প্রয়োজন নেই</h4>
+      <p>ZeroLive সম্পূর্ণ বিনামূল্যে। কোনো রেজিস্ট্রেশন, বিজ্ঞাপন বা ঝামেলা নেই। শুধু ক্লিক করুন আর দেখুন।</p>
+    </div>
+    <div class="howto-card">
+      <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
+      <h4>স্ট্রিম সমস্যা?</h4>
+      <p>স্ট্রিম ব্যর্থ হলে প্লেয়ার স্বয়ংক্রিয়ভাবে পরবর্তী সার্ভারে চলে যাবে। আপনি যেকোনো সময় ম্যানুয়ালি সার্ভার পরিবর্তন করতে পারেন।</p>
+    </div>
+  </div>
+</section>
 
 <footer class="footer">
   ZeroLive &mdash; Free sports streaming
