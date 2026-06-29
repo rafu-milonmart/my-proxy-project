@@ -99,31 +99,15 @@ set RUN_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive.lnk
 set UNINSTALL_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive Uninstall.lnk
 
 if not exist "%RUN_SHORTCUT%" (
-    set VBS=%TEMP%\zl_run.vbs
-    >"%VBS%" echo Set WshShell = WScript.CreateObject("WScript.Shell")
-    >>"%VBS%" echo Set Shortcut = WshShell.CreateShortcut("%RUN_SHORTCUT%")
-    >>"%VBS%" echo Shortcut.TargetPath = "%INSTALL_DIR%\run.bat"
-    >>"%VBS%" echo Shortcut.WorkingDirectory = "%INSTALL_DIR%"
-    >>"%VBS%" echo Shortcut.Description = "ZeroLive - Free Sports Streaming"
-    >>"%VBS%" echo Shortcut.Save
-    cscript //nologo "%VBS%"
+    powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%RUN_SHORTCUT%');$s.TargetPath='%INSTALL_DIR%\run.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='ZeroLive - Free Sports Streaming';$s.Save()"
     if !errorlevel! equ 0 ( echo   "ZeroLive" shortcut created on desktop. ) else ( echo   [WARN] Could not create run shortcut. )
-    del "%VBS%" >nul 2>&1
 ) else (
     echo   Run shortcut already exists.
 )
 
 if not exist "%UNINSTALL_SHORTCUT%" (
-    set VBS=%TEMP%\zl_uninst.vbs
-    >"%VBS%" echo Set WshShell = WScript.CreateObject("WScript.Shell")
-    >>"%VBS%" echo Set Shortcut = WshShell.CreateShortcut("%UNINSTALL_SHORTCUT%")
-    >>"%VBS%" echo Shortcut.TargetPath = "%INSTALL_DIR%\uninstall.bat"
-    >>"%VBS%" echo Shortcut.WorkingDirectory = "%INSTALL_DIR%"
-    >>"%VBS%" echo Shortcut.Description = "Remove ZeroLive"
-    >>"%VBS%" echo Shortcut.Save
-    cscript //nologo "%VBS%"
+    powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%UNINSTALL_SHORTCUT%');$s.TargetPath='%INSTALL_DIR%\uninstall.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='Remove ZeroLive';$s.Save()"
     if !errorlevel! equ 0 ( echo   "ZeroLive Uninstall" shortcut created on desktop. ) else ( echo   [WARN] Could not create uninstall shortcut. )
-    del "%VBS%" >nul 2>&1
 ) else (
     echo   Uninstall shortcut already exists.
 )
@@ -132,7 +116,7 @@ echo.
 REM Step 5: Firewall rule + README
 echo [5/5] Configuring firewall and README...
 netsh advfirewall firewall add rule name="ZeroLive" dir=in action=allow program="%INSTALL_DIR%\python\python.exe" profile=private enable=yes >nul 2>&1
-if !errorlevel! equ 0 ( echo   Firewall rule added. ) else ( echo   [SKIP] Could not add firewall rule (may need admin). )
+if !errorlevel! equ 0 ( echo   Firewall rule added. ) else ( echo   [SKIP] Could not add firewall rule - may need admin. )
 echo.
 
 REM README
