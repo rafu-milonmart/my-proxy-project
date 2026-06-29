@@ -9,47 +9,54 @@ echo ============================================
 echo.
 
 set INSTALL_DIR=C:\Zero_live
+set PYTHON_DIR=%INSTALL_DIR%\python
+set PYTHON_VERSION=3.12.5
 
 REM Check if already installed
 if /I "%~dp0"=="%INSTALL_DIR%\" goto :already_there
 
-REM Step 1: Check / Install Python
-echo [1/6] Checking Python...
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   Python not found. Installing via winget...
-    echo   (This requires an internet connection.)
-    echo.
-    winget install --id Python.Python.3.12 --silent --accept-package-agreements
+REM Step 1: Download portable Python
+echo [1/6] Setting up portable Python...
+if not exist "%PYTHON_DIR%\python.exe" (
+    echo   Downloading Python %PYTHON_VERSION% (embedded)...
+    if not exist "%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip" (
+        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-embed-amd64.zip' -OutFile '%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip'}"
+        if !errorlevel! neq 0 (
+            echo [ERROR] Failed to download Python. Check your internet.
+            pause
+            exit /b 1
+        )
+    )
+    echo   Extracting...
+    if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
+    powershell -Command "Expand-Archive -Path '%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip' -DestinationPath '%PYTHON_DIR%' -Force"
     if !errorlevel! neq 0 (
-        echo [ERROR] Winget install failed.
-        echo.
-        echo Try manually: winget install Python.Python.3.12
-        echo Or download from https://www.python.org/downloads/
+        echo [ERROR] Failed to extract Python.
         pause
         exit /b 1
     )
-    echo   Python installed successfully.
-    REM Refresh PATH so we can find Python right away
-    for /f "tokens=*" %%a in ('powershell -Command "[Environment]::GetEnvironmentVariable('Path','User')"') do set "PATH=%%a;%PATH%"
-    REM Try common install locations if still not found
-    python --version >nul 2>&1
-    if !errorlevel! neq 0 (
-        for %%p in ("%LocalAppData%\Programs\Python\Python312" "%ProgramFiles%\Python312" "%LocalAppData%\Microsoft\WindowsApps") do (
-            if exist "%%~p\python.exe" set "PATH=%%~p;%PATH%"
-        )
+    REM Enable site-packages in embedded Python
+    set "PTH_FILE=%PYTHON_DIR%\python._pth"
+    if exist "!PTH_FILE!" (
+        powershell -Command "(Get-Content '!PTH_FILE!') -replace '#import site','import site' | Set-Content '!PTH_FILE!'"
     )
+    REM Download and install pip
+    echo   Installing pip...
+    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%TEMP%\get-pip.py'}"
+    %PYTHON_DIR%\python.exe "%TEMP%\get-pip.py" --quiet >nul 2>&1
+    if !errorlevel! neq 0 ( echo   [WARN] pip install had issues. ) else ( echo   pip installed. )
+    echo   Portable Python ready.
 ) else (
-    echo   Python found.
+    echo   Portable Python already exists.
 )
 echo.
 
 REM Show Python version
-python --version
+%PYTHON_DIR%\python.exe --version
 echo.
 
-REM Step 2: Copy files to C:\Zero_live
-echo [2/6] Copying files to %INSTALL_DIR%...
+REM Step 2: Copy app files to C:\Zero_live
+echo [2/6] Copying app files to %INSTALL_DIR%...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 xcopy /E /Y /Q "%~dp0." "%INSTALL_DIR%\" >nul 2>&1
 if %errorlevel% neq 0 (
@@ -63,10 +70,13 @@ echo.
 :already_there
 cd /d "%INSTALL_DIR%"
 
+REM Use portable Python
+set PYTHON=%INSTALL_DIR%\python\python.exe
+
 REM Step 3: Create virtual environment
 echo [3/6] Creating virtual environment...
 if not exist ".venv" (
-    python -m venv .venv
+    %PYTHON% -m venv .venv
     if %errorlevel% neq 0 (
         echo [ERROR] Failed to create virtual environment.
         pause
@@ -122,7 +132,7 @@ if not exist "%UNINSTALL_SHORTCUT%" (
 )
 echo.
 
-REM Step 6: Add firewall rule (optional, for local network access)
+REM Step 6: Firewall rule
 echo [6/6] Adding firewall rule for local network access...
 netsh advfirewall firewall add rule name="ZeroLive" dir=in action=allow program="%INSTALL_DIR%\.venv\Scripts\python.exe" profile=private enable=yes >nul 2>&1
 if !errorlevel! equ 0 ( echo   Firewall rule added. ) else ( echo   [SKIP] Could not add firewall rule (may need admin). )
