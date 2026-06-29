@@ -242,6 +242,47 @@ body{
   -webkit-font-smoothing:antialiased;
   min-height:100vh;overflow-x:hidden;
 }
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 40% 50% at 20% 10%,rgba(255,45,85,.09),transparent),
+    radial-gradient(ellipse 50% 60% at 80% 90%,rgba(121,54,247,.09),transparent),
+    radial-gradient(ellipse 30% 30% at 50% 50%,rgba(255,45,85,.04),transparent);
+  animation:bgShift 20s ease-in-out infinite;
+}
+body::after{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 80%,rgba(255,45,85,.04),transparent),
+    radial-gradient(ellipse 40% 60% at 90% 20%,rgba(121,54,247,.04),transparent);
+  animation:bgShift2 25s ease-in-out infinite;
+}
+.orb{
+  position:fixed;border-radius:50%;pointer-events:none;z-index:0;
+  filter:blur(80px);animation:orbFloat 12s ease-in-out infinite;
+}
+.orb-1{width:400px;height:400px;background:rgba(255,45,85,.12);top:-100px;right:-100px;animation-delay:0s}
+.orb-2{width:350px;height:350px;background:rgba(121,54,247,.10);bottom:-80px;left:-80px;animation-delay:-4s}
+.orb-3{width:300px;height:300px;background:rgba(255,45,85,.06);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:-8s}
+.orb-4{width:250px;height:250px;background:rgba(255,45,85,.04);top:20%;left:80%;animation-delay:-2s}
+.orb-5{width:200px;height:200px;background:rgba(121,54,247,.05);bottom:30%;right:70%;animation-delay:-6s}
+@keyframes bgShift{
+  0%,100%{transform:translate(0,0)}
+  33%{transform:translate(2%,-1%)}
+  66%{transform:translate(-1%,2%)}
+}
+@keyframes bgShift2{
+  0%,100%{transform:translate(0,0) rotate(0deg)}
+  25%{transform:translate(-2%,2%) rotate(3deg)}
+  50%{transform:translate(1%,-1%) rotate(-2deg)}
+  75%{transform:translate(-1%,-2%) rotate(4deg)}
+}
+@keyframes orbFloat{
+  0%,100%{transform:translate(0,0) scale(1)}
+  25%{transform:translate(30px,-30px) scale(1.1)}
+  50%{transform:translate(-20px,20px) scale(.95)}
+  75%{transform:translate(15px,30px) scale(1.05)}
+}
 a{color:inherit;text-decoration:none}
 button{cursor:pointer;font:inherit;border:none;background:none;color:inherit}
 img{max-width:100%;display:block}
@@ -327,6 +368,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 }
 .player-clip{overflow:hidden;border-radius:var(--radius);position:relative}
 .player-wrap:focus-within{box-shadow:var(--shadow),0 0 0 1px var(--accent-glow)}
+.player-wrap.playing{box-shadow:var(--shadow),0 0 20px var(--accent-glow);border-color:var(--accent-dim);animation:playerPulse 3s ease-in-out infinite}
+@keyframes playerPulse{0%,100%{box-shadow:var(--shadow),0 0 20px var(--accent-glow)}50%{box-shadow:var(--shadow),0 0 35px var(--accent-glow),0 0 60px var(--accent-dim)}}
 .player-aspect{
   position:relative;width:100%;
   aspect-ratio:16/9;background:#000;
@@ -594,6 +637,12 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 </head>
 <body>
 
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+<div class="orb orb-4"></div>
+<div class="orb orb-5"></div>
+
 <header class="header">
   <div class="header-inner">
     <a href="/" class="header-back" aria-label="Back to home">
@@ -767,6 +816,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var player = null;
   var activeIdx = -1;
   var fallbackTried = {};
+  var retryCount = 0;
+  var maxRetries = 5;
+  var retryTimer = null;
   var L = function(msg) { try { console.log('[ZL]', msg); } catch(_) {} };
   L('init streams=' + (streams ? streams.length : 'null') + ' dashjs=' + (typeof dashjs!=='undefined') + ' hlsjs=' + (typeof Hls!=='undefined'));
 
@@ -776,8 +828,16 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       if(!fallbackTried[next]){fallbackTried[next]=true;loadStream(next);return true;}
       next++;
     }
-    showPlaceholder('All streams unavailable');
-    spinner.classList.add('hidden');
+    if(retryCount<maxRetries){
+      retryCount++;
+      showPlaceholder('All streams unavailable · Retry '+retryCount+'/'+maxRetries+' in 10s...');
+      spinner.classList.remove('hidden');
+      if(retryTimer)clearTimeout(retryTimer);
+      retryTimer=setTimeout(function(){fallbackTried={};loadStream(0);},10000);
+    }else{
+      showPlaceholder('All streams unavailable');
+      spinner.classList.add('hidden');
+    }
     return false;
   }
 
@@ -877,7 +937,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   });
   video.addEventListener('waiting',function(){spinner.classList.remove('hidden');});
   video.addEventListener('canplay',function(){spinner.classList.add('hidden');});
-  video.addEventListener('playing',function(){spinner.classList.add('hidden');});
+  video.addEventListener('playing',function(){spinner.classList.add('hidden');playerWrap.classList.add('playing');});
+  video.addEventListener('pause',function(){playerWrap.classList.remove('playing');});
+  video.addEventListener('waiting',function(){playerWrap.classList.remove('playing');});
 
   playBtn.addEventListener('click',function(){if(video.paused)video.play();else video.pause();});
   centerPlay.addEventListener('click',function(){if(video.paused)video.play();else video.pause();});
@@ -1084,7 +1146,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(typeof dashjs==='undefined'){showPlaceholder('Dash.js failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
         var dashPlayer=dashjs.MediaPlayer().create();
-        url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx;
         if(drmKid && drmKey){
           var ck={};ck[drmKid.toLowerCase()]=drmKey.toLowerCase();
           dashPlayer.setProtectionData({'org.w3.clearkey':{'clearkeys':ck}});
@@ -1146,7 +1207,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     var btn=e.target.closest('.srv-btn');
     if(!btn)return;
     var idx=parseInt(btn.dataset.idx);
-    if(!isNaN(idx)){fallbackTried={};loadStream(idx);}
+    if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
   });
 
   if(streams&&streams.length>0){loadStream(0);}else{showPlaceholder('No streams available');}

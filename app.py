@@ -341,6 +341,49 @@ def proxy_hls(slug, idx):
         return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
 
 
+@app.route('/proxy/dashseg/<slug>/<int:idx>/<path:seg_path>')
+def proxy_dash_seg(slug, idx, seg_path):
+    servers = fetch_playback(slug)
+    if not servers:
+        return jsonify({"error": "No servers found"}), 404
+    srv = servers[0]
+    result = decrypt_payload(srv['enc'], str(srv['bucket']))
+    if not result or 'streams' not in result or not (0 <= idx < len(result['streams'])):
+        return jsonify({"error": "Invalid stream"}), 404
+
+    stream_url = result['streams'][idx]['stream_url']
+    base_dir = stream_url[:stream_url.rfind('/') + 1]
+    target = urljoin(base_dir, seg_path)
+    qs = request.query_string
+    if qs:
+        target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
+
+    logging.info(f"proxy_dash_seg slug={slug} idx={idx} seg_path={seg_path} target={target}")
+
+    http = get_media_http()
+    for attempt in range(2):
+        try:
+            resp = http.get(target)
+            if resp.status_code == 200 or resp.status_code in (206, 302, 301):
+                if resp.status_code == 200 or resp.status_code == 206:
+                    return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+                if resp.status_code in (301, 302):
+                    redirect = resp.headers.get('location', '')
+                    if redirect:
+                        resp = http.get(redirect)
+                        if resp.status_code == 200 or resp.status_code == 206:
+                            return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+            logging.warning(f"proxy_dash_seg attempt {attempt+1} got {resp.status_code} for {target[:120]} body_preview={resp.text[:200]}")
+            if attempt == 0:
+                time.sleep(0.5)
+        except Exception as e:
+            logging.warning(f"proxy_dash_seg attempt {attempt+1} failed: {e}")
+            if attempt == 0:
+                time.sleep(0.5)
+
+    return jsonify({"error": "Segment fetch failed"}), 502
+
+
 @app.route('/proxy/manifest/<slug>/<int:idx>')
 def proxy_manifest(slug, idx):
     servers = fetch_playback(slug)
@@ -385,10 +428,8 @@ def proxy_manifest(slug, idx):
     body = resp.text
 
     if '.mpd' in url:
-        # Rewrite BaseURL to proxy so segments also get proper headers (Referer, X-LSP-Enc, etc.)
-        proxy_base = request.host_url.rstrip('/') + '/proxy/hls/' + slug + '/' + str(idx) + '/?url='
-        body = re.sub(r'<BaseURL[^>]*>[^<]*</BaseURL>', '', body)
-        body = re.sub(r'(<MPD[^>]*>)', r'\1\n<BaseURL>' + proxy_base + '</BaseURL>', body, count=1)
+        # Leave original segment URLs intact — CDN allows CORS (Access-Control-Allow-Origin: *)
+        # so the browser can fetch segments directly. Only inject ClearKey DRM.
 
         # Inject ClearKey ContentProtection if we have the key
         if drm_kid and drm_key:
