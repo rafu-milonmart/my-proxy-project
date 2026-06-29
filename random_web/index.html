@@ -37,10 +37,35 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple
   <div class="logo">ZEROLIVE</div>
   <div class="sub">Free sports streaming for your PC</div>
 
-  <a href="https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/master/installer.bat" class="dl-btn" download>
+  <button class="dl-btn" id="dlBtn">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-    Download for Windows
-  </a>
+    <span id="dlText">Download for Windows</span>
+  </button>
+  <p style="font-size:11px;color:var(--text-tertiary);margin-top:8px" id="dlStatus"></p>
+  <script>
+    document.getElementById('dlBtn').addEventListener('click',function(){
+      var btn=this,text=document.getElementById('dlText'),status=document.getElementById('dlStatus');
+      text.textContent='Downloading...';btn.style.opacity='.6';btn.style.pointerEvents='none';
+      status.textContent='Fetching latest installer from GitHub...';
+      fetch('https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/master/installer.bat')
+        .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+        .then(function(blob){
+          var a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download='installer.bat';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+          text.textContent='Download for Windows';btn.style.opacity='1';btn.style.pointerEvents='auto';
+          status.textContent='';
+        })
+        ['catch'](function(e){
+          text.textContent='Download for Windows';btn.style.opacity='1';btn.style.pointerEvents='auto';
+          status.textContent='Download failed. Try right-click → Save link as: https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/master/installer.bat';
+        });
+    });
+  </script>
 
   <ul class="features">
     <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Live football, cricket, basketball, tennis &amp; more</li>
