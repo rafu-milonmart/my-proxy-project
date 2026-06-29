@@ -16,54 +16,36 @@ REM Always download fresh from GitHub (installer runs from Downloads folder)
 set GITHUB_REPO=https://github.com/rafu-milonmart/my-proxy-project
 set ZIP_URL=%GITHUB_REPO%/archive/master.zip
 
-REM Step 1: Download portable Python
-echo [1/5] Setting up portable Python...
+REM Step 1: Download and install full Python
+echo [1/5] Setting up Python...
 if not exist "%PYTHON_DIR%\python.exe" (
-    echo   Downloading Python %PYTHON_VERSION% embedded version...
-    if not exist "%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip" (
-        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-embed-amd64.zip' -OutFile '%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip'}"
+    echo   Downloading Python %PYTHON_VERSION% (full installer)...
+    set PYTHON_INSTALLER=%TEMP%\python-%PYTHON_VERSION%-amd64.exe
+    if not exist "!PYTHON_INSTALLER!" (
+        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-amd64.exe' -OutFile '%TEMP%\python-%PYTHON_VERSION%-amd64.exe'}"
         if !errorlevel! neq 0 (
-            echo [ERROR] Failed to download Python. Check your internet.
+            echo [ERROR] Failed to download Python installer. Check your internet.
             pause
             exit /b 1
         )
     )
-    echo   Extracting...
+    echo   Installing Python to %PYTHON_DIR%...
     if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
-    powershell -Command "Expand-Archive -Path '%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip' -DestinationPath '%PYTHON_DIR%' -Force"
+    start /wait "" "!PYTHON_INSTALLER!" InstallAllUsers=0 Include_launcher=0 PrependPath=0 TargetDir="%PYTHON_DIR%" /quiet >nul 2>&1
     if !errorlevel! neq 0 (
-        echo [ERROR] Failed to extract Python.
+        echo [ERROR] Python installer failed with code !errorlevel!.
         pause
         exit /b 1
     )
-    REM Enable site-packages in embedded Python (required for pip)
-    set "PTH_FILE=%PYTHON_DIR%\python._pth"
-    if exist "!PTH_FILE!" (
-        powershell -Command "(Get-Content '!PTH_FILE!') -replace '#import site','import site' | Set-Content '!PTH_FILE!'"
-    )
-    REM Install pip via ensurepip (bundled in python3.zip, no download needed)
-    echo   Installing pip...
-    %PYTHON_DIR%\python.exe -m ensurepip --upgrade
-    if !errorlevel! neq 0 (
-        echo   [WARN] ensurepip had issues. Trying get-pip.py fallback...
-        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%TEMP%\get-pip.py'}"
-        %PYTHON_DIR%\python.exe "%TEMP%\get-pip.py"
-        if !errorlevel! neq 0 (
-            echo [ERROR] Could not install pip. Python may be corrupt.
-            pause
-            exit /b 1
-        )
-    )
-    %PYTHON_DIR%\python.exe -m pip --version
-    echo   pip ready.
-    echo   Portable Python ready.
+    echo   Python installed.
 ) else (
-    echo   Portable Python already exists.
+    echo   Python already installed.
 )
 echo.
 
 REM Show Python version
 %PYTHON_DIR%\python.exe --version
+%PYTHON_DIR%\python.exe -m pip --version
 echo.
 
 REM Step 2: Download app files from GitHub
@@ -93,7 +75,7 @@ cd /d "%INSTALL_DIR%"
 REM Use portable Python
 set PYTHON=%INSTALL_DIR%\python\python.exe
 
-REM Step 3: Install dependencies directly (embedded Python is already isolated)
+REM Step 3: Install dependencies
 echo [3/5] Installing dependencies...
 if not exist "requirements.txt" (
     echo [ERROR] requirements.txt not found! GitHub download may have failed.
