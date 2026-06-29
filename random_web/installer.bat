@@ -116,27 +116,31 @@ set RUN_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive.lnk
 set UNINSTALL_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive Uninstall.lnk
 
 if not exist "%RUN_SHORTCUT%" (
-    powershell -Command ^
-        $WS = New-Object -ComObject WScript.Shell; ^
-        $SC = $WS.CreateShortcut('%RUN_SHORTCUT%'); ^
-        $SC.TargetPath = '%INSTALL_DIR%\run.bat'; ^
-        $SC.WorkingDirectory = '%INSTALL_DIR%'; ^
-        $SC.Description = 'ZeroLive - Free Sports Streaming'; ^
-        $SC.Save()
+    set VBS=%TEMP%\zl_run.vbs
+    >"%VBS%" echo Set WshShell = WScript.CreateObject("WScript.Shell")
+    >>"%VBS%" echo Set Shortcut = WshShell.CreateShortcut("%RUN_SHORTCUT%")
+    >>"%VBS%" echo Shortcut.TargetPath = "%INSTALL_DIR%\run.bat"
+    >>"%VBS%" echo Shortcut.WorkingDirectory = "%INSTALL_DIR%"
+    >>"%VBS%" echo Shortcut.Description = "ZeroLive - Free Sports Streaming"
+    >>"%VBS%" echo Shortcut.Save
+    cscript //nologo "%VBS%"
     if !errorlevel! equ 0 ( echo   "ZeroLive" shortcut created on desktop. ) else ( echo   [WARN] Could not create run shortcut. )
+    del "%VBS%" >nul 2>&1
 ) else (
     echo   Run shortcut already exists.
 )
 
 if not exist "%UNINSTALL_SHORTCUT%" (
-    powershell -Command ^
-        $WS = New-Object -ComObject WScript.Shell; ^
-        $SC = $WS.CreateShortcut('%UNINSTALL_SHORTCUT%'); ^
-        $SC.TargetPath = '%INSTALL_DIR%\uninstall.bat'; ^
-        $SC.WorkingDirectory = '%INSTALL_DIR%'; ^
-        $SC.Description = 'Remove ZeroLive'; ^
-        $SC.Save()
+    set VBS=%TEMP%\zl_uninst.vbs
+    >"%VBS%" echo Set WshShell = WScript.CreateObject("WScript.Shell")
+    >>"%VBS%" echo Set Shortcut = WshShell.CreateShortcut("%UNINSTALL_SHORTCUT%")
+    >>"%VBS%" echo Shortcut.TargetPath = "%INSTALL_DIR%\uninstall.bat"
+    >>"%VBS%" echo Shortcut.WorkingDirectory = "%INSTALL_DIR%"
+    >>"%VBS%" echo Shortcut.Description = "Remove ZeroLive"
+    >>"%VBS%" echo Shortcut.Save
+    cscript //nologo "%VBS%"
     if !errorlevel! equ 0 ( echo   "ZeroLive Uninstall" shortcut created on desktop. ) else ( echo   [WARN] Could not create uninstall shortcut. )
+    del "%VBS%" >nul 2>&1
 ) else (
     echo   Uninstall shortcut already exists.
 )
@@ -148,6 +152,40 @@ netsh advfirewall firewall add rule name="ZeroLive" dir=in action=allow program=
 if !errorlevel! equ 0 ( echo   Firewall rule added. ) else ( echo   [SKIP] Could not add firewall rule (may need admin). )
 echo.
 
+REM Step 7: Create README
+echo [7/7] Creating README...
+set README_FILE=%INSTALL_DIR%\readme.txt
+(
+echo =============================================
+echo   ZeroLive - Free Sports Streaming
+echo =============================================
+echo.
+echo HOW TO USE:
+echo 1. Double-click "ZeroLive" on your desktop
+echo 2. Your browser opens to http://127.0.0.1:9090
+echo 3. Select a live match and enjoy!
+echo.
+echo CONTROLS:
+echo   Space  - Play/Pause
+echo   F      - Fullscreen
+echo   M      - Mute/Unmute
+echo   I      - Stream info overlay
+echo   S      - Speed menu
+echo   Arrows - Seek / Volume
+echo.
+echo TROUBLESHOOTING:
+echo - If the app doesn't start, run run.bat manually
+echo - Firewall alert is normal - allow access
+echo - For VLC: use the M3U link from the app
+echo.
+echo UNINSTALL:
+echo Double-click "ZeroLive Uninstall" on your desktop
+echo.
+echo Version: 1.0
+echo =============================================
+) > "%README_FILE%"
+echo   README created.
+
 echo ============================================
 echo   Installation complete!
 echo.
@@ -155,5 +193,7 @@ echo   - Double-click "ZeroLive" on your desktop to start
 echo   - "ZeroLive Uninstall" to remove
 echo   - App runs at http://127.0.0.1:9090
 echo ============================================
+echo.
+start notepad "%README_FILE%"
 echo.
 pause
