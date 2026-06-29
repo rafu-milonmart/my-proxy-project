@@ -36,16 +36,26 @@ if not exist "%PYTHON_DIR%\python.exe" (
         pause
         exit /b 1
     )
-    REM Enable site-packages in embedded Python
+    REM Enable site-packages in embedded Python (required for pip)
     set "PTH_FILE=%PYTHON_DIR%\python._pth"
     if exist "!PTH_FILE!" (
         powershell -Command "(Get-Content '!PTH_FILE!') -replace '#import site','import site' | Set-Content '!PTH_FILE!'"
     )
-    REM Download and install pip
+    REM Install pip via ensurepip (bundled in python3.zip, no download needed)
     echo   Installing pip...
-    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%TEMP%\get-pip.py'}"
-    %PYTHON_DIR%\python.exe "%TEMP%\get-pip.py" --quiet >nul 2>&1
-    if !errorlevel! neq 0 ( echo   [WARN] pip install had issues. ) else ( echo   pip installed. )
+    %PYTHON_DIR%\python.exe -m ensurepip --upgrade
+    if !errorlevel! neq 0 (
+        echo   [WARN] ensurepip had issues. Trying get-pip.py fallback...
+        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%TEMP%\get-pip.py'}"
+        %PYTHON_DIR%\python.exe "%TEMP%\get-pip.py"
+        if !errorlevel! neq 0 (
+            echo [ERROR] Could not install pip. Python may be corrupt.
+            pause
+            exit /b 1
+        )
+    )
+    %PYTHON_DIR%\python.exe -m pip --version
+    echo   pip ready.
     echo   Portable Python ready.
 ) else (
     echo   Portable Python already exists.
