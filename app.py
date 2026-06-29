@@ -1,4 +1,4 @@
-import os, sys, re, base64, hashlib, json, logging, time, threading
+import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess
 from urllib.parse import urlparse, urljoin
 from pathlib import Path
 from flask import Flask, send_from_directory, Response, request, jsonify, render_template
@@ -446,6 +446,35 @@ def proxy_manifest(slug, idx):
     return Response(body, content_type='application/dash+xml')
 
 
+@app.route('/api/update/check')
+def update_check():
+    try:
+        subprocess.run(['git', 'fetch', 'origin', 'master'], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(['git', 'log', 'HEAD..origin/master', '--oneline'], capture_output=True, text=True, timeout=5)
+        commits = [c.strip() for c in r.stdout.strip().split('\n') if c.strip()]
+        r2 = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, timeout=5)
+        current = r2.stdout.strip()
+        return jsonify({'ok': True, 'current': current, 'commits': commits, 'updates': len(commits) > 0})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+@app.route('/api/update/apply')
+def update_apply():
+    try:
+        r = subprocess.run(['git', 'pull', 'origin', 'master'], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return jsonify({'ok': False, 'error': r.stderr or r.stdout})
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt', '--quiet'], capture_output=True, timeout=30)
+        return jsonify({'ok': True, 'message': r.stdout.strip()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+@app.route('/api/update/restart')
+def update_restart():
+    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
+    return jsonify({'ok': True, 'message': 'Restarting...'})
+
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
@@ -462,7 +491,7 @@ def serve_static(filename):
 
 
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9090
+    port = int(os.environ.get('PORT', sys.argv[1] if len(sys.argv) > 1 else 9090))
     print(f"Server: http://0.0.0.0:{port}")
     print(f"M3U:   http://0.0.0.0:{port}/playlist.m3u")
     app.run(host='0.0.0.0', port=port, threaded=True)

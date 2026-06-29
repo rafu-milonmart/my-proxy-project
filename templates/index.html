@@ -413,6 +413,71 @@ img{max-width:100%;display:block}
 .howto-bn .howto-card h4{font-weight:500}
 .howto-bn .howto-card p{font-size:12px}
 
+/* Warning banner */
+.warning-banner{
+  position:relative;z-index:1;max-width:800px;margin:0 auto;padding:8px 24px 0;
+}
+.warning-banner-inner{
+  display:flex;align-items:flex-start;gap:8px;
+  padding:10px 14px;border-radius:var(--radius-sm);
+  background:rgba(250,204,21,.08);border:1px solid rgba(250,204,21,.15);
+  font-size:11px;color:#facc15;line-height:1.5;
+}
+.warning-banner-inner .warn-icon{flex-shrink:0;margin-top:1px}
+.warning-banner-inner .warn-close{
+  flex-shrink:0;margin-left:auto;padding:2px 6px;
+  border-radius:4px;color:rgba(250,204,21,.5);font-size:14px;cursor:pointer;
+}
+.warning-banner-inner .warn-close:hover{color:#facc15;background:rgba(250,204,21,.1)}
+.warning-banner-inner .warn-bn{display:block;margin-top:4px;opacity:.6;font-size:10px}
+
+/* Settings modal */
+.modal-overlay{
+  display:none;position:fixed;inset:0;z-index:500;
+  background:rgba(0,0,0,.65);backdrop-filter:blur(8px);
+  align-items:center;justify-content:center;
+}
+.modal-overlay.open{display:flex}
+.modal-box{
+  background:var(--bg-elevated);border:1px solid var(--line-strong);
+  border-radius:var(--radius);max-width:420px;width:90%;
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.modal-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid var(--line);
+  font-weight:700;font-size:15px;
+}
+.modal-header button{
+  width:28px;height:28px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;
+  color:var(--text-secondary);font-size:18px;transition:all .15s;
+}
+.modal-header button:hover{background:var(--bg-hover);color:var(--text)}
+.modal-body{padding:16px 18px}
+.modal-body .field{margin-bottom:12px}
+.modal-body .field:last-child{margin-bottom:0}
+.modal-body .field label{display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}
+.modal-body .field .val{font-size:13px;color:var(--text)}
+.modal-body .field .hint{font-size:10px;color:var(--text-tertiary);margin-top:2px}
+.modal-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 16px;border-radius:var(--radius-sm);
+  font-size:12px;font-weight:600;transition:all .2s;
+  background:var(--bg-card);border:1px solid var(--line);color:var(--text-secondary);
+}
+.modal-btn:hover{border-color:var(--accent-2);color:var(--text)}
+.modal-btn.primary{background:linear-gradient(135deg,var(--accent-1),var(--accent-2));color:#fff;border-color:transparent}
+.modal-btn.primary:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(255,45,85,.25)}
+.modal-btn:disabled{opacity:.4;cursor:default;transform:none!important}
+.modal-btn .spinner-sm{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;display:none}
+.modal-btn.loading .spinner-sm{display:inline-block}
+.modal-btn.loading .btn-text{display:none}
+.update-log{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.update-log .log-title{font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.update-log .commit-list{font-size:11px;color:var(--text-secondary);line-height:1.6}
+.update-log .commit-list li{list-style:none;padding:2px 0;font-family:monospace}
+
 .footer{
   position:relative;z-index:1;
   text-align:center;padding:28px 24px;
@@ -455,6 +520,7 @@ img{max-width:100%;display:block}
       <input id="search" class="search-input" placeholder="Search teams, leagues..." autocomplete="off">
     </div>
     <div class="header-actions">
+      <button class="btn-icon" id="settingsBtn" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
       <button class="btn-icon" id="refreshBtn" title="Refresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>
       <a href="/playlist.m3u" class="btn-m3u" download><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 20 8-12-8-4-4 8z"/><path d="M14 20h8"/><path d="M18 16v4"/></svg>M3U</a>
     </div>
@@ -472,6 +538,49 @@ img{max-width:100%;display:block}
   <nav class="filter-bar" id="filterBar"></nav>
   <div id="eventsGrid"></div>
 </main>
+
+<div class="warning-banner" id="warningBanner">
+  <div class="warning-banner-inner">
+    <svg class="warn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/></svg>
+    <div>
+      This web app only works on this PC and local network. Stream URLs are resolved locally and may not work on other devices.
+      <span class="warn-bn">এই ওয়েব অ্যাপ শুধুমাত্র এই পিসি এবং লোকাল নেটওয়ার্কে কাজ করে। স্ট্রিম ইউআরএল স্থানীয়ভাবে রিজলভ হয় এবং অন্যান্য ডিভাইসে কাজ নাও করতে পারে।</span>
+    </div>
+    <button class="warn-close" id="warnClose">&times;</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span>Settings</span>
+      <button id="settingsClose">&times;</button>
+    </div>
+    <div class="modal-body" id="settingsBody">
+      <div class="field">
+        <label>Version</label>
+        <div class="val" id="settingsVersion">Loading...</div>
+      </div>
+      <div class="field">
+        <label>Updates</label>
+        <div class="val" id="settingsUpdates">Check for updates...</div>
+        <div class="hint" id="settingsHint"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="modal-btn primary" id="updateCheckBtn">
+          <span class="spinner-sm"></span><span class="btn-text">Check for Updates</span>
+        </button>
+        <button class="modal-btn" id="updateApplyBtn" style="display:none">
+          <span class="spinner-sm"></span><span class="btn-text">Apply Update</span>
+        </button>
+      </div>
+      <div class="update-log" id="updateLog" style="display:none">
+        <div class="log-title">Pending Commits</div>
+        <div class="commit-list" id="commitList"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <section class="howto">
   <div class="howto-title">How to Use</div>
@@ -739,6 +848,95 @@ img{max-width:100%;display:block}
     document.body.appendChild(t);
     setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .4s';setTimeout(function(){t.remove();},500);},4000);
   }
+
+  /* ---- Warning Banner ---- */
+  if(!localStorage.getItem('zl-warn-dismissed')){
+    document.getElementById('warningBanner').style.display='block';
+  }
+  document.getElementById('warnClose').addEventListener('click',function(){
+    document.getElementById('warningBanner').style.display='none';
+    localStorage.setItem('zl-warn-dismissed','1');
+  });
+
+  /* ---- Settings Modal ---- */
+  var settingsModal=document.getElementById('settingsModal');
+  var settingsBody=document.getElementById('settingsBody');
+  var settingsVersion=document.getElementById('settingsVersion');
+  var settingsUpdates=document.getElementById('settingsUpdates');
+  var settingsHint=document.getElementById('settingsHint');
+  var updateLog=document.getElementById('updateLog');
+  var commitList=document.getElementById('commitList');
+  var updateCheckBtn=document.getElementById('updateCheckBtn');
+  var updateApplyBtn=document.getElementById('updateApplyBtn');
+
+  document.getElementById('settingsBtn').addEventListener('click',function(){
+    settingsModal.classList.add('open');
+    checkUpdates(true);
+  });
+  document.getElementById('settingsClose').addEventListener('click',function(){
+    settingsModal.classList.remove('open');
+  });
+  settingsModal.addEventListener('click',function(e){
+    if(e.target===settingsModal)settingsModal.classList.remove('open');
+  });
+
+  function checkUpdates(silent){
+    updateCheckBtn.classList.add('loading');
+    updateCheckBtn.disabled=true;
+    settingsUpdates.textContent='Checking...';
+    fetch('/api/update/check').then(function(r){return r.json();}).then(function(d){
+      updateCheckBtn.classList.remove('loading');
+      updateCheckBtn.disabled=false;
+      if(!d.ok){
+        settingsUpdates.textContent='Error: '+(d.error||'unknown');
+        return;
+      }
+      settingsVersion.textContent=d.current||'unknown';
+      if(d.updates&&d.commits.length){
+        settingsUpdates.textContent=d.commits.length+' update(s) available';
+        settingsUpdates.style.color='var(--live)';
+        updateLog.style.display='block';
+        commitList.innerHTML=d.commits.map(function(c){return '<li>'+E(c)+'</li>';}).join('');
+        updateApplyBtn.style.display='inline-flex';
+        settingsHint.textContent='Click "Apply Update" to pull the latest code and restart.';
+      }else{
+        settingsUpdates.textContent='Up to date';
+        settingsUpdates.style.color='var(--accent-1)';
+        updateLog.style.display='none';
+        updateApplyBtn.style.display='none';
+        settingsHint.textContent=silent?'':'No updates available.';
+      }
+    })['catch'](function(e){
+      updateCheckBtn.classList.remove('loading');
+      updateCheckBtn.disabled=false;
+      settingsUpdates.textContent='Offline (not a git repo)';
+      settingsHint.textContent='Update checking requires a git installation.';
+    });
+  }
+  updateCheckBtn.addEventListener('click',function(){checkUpdates(false);});
+
+  updateApplyBtn.addEventListener('click',function(){
+    updateApplyBtn.classList.add('loading');
+    updateApplyBtn.disabled=true;
+    settingsUpdates.textContent='Applying...';
+    fetch('/api/update/apply').then(function(r){return r.json();}).then(function(d){
+      updateApplyBtn.classList.remove('loading');
+      updateApplyBtn.disabled=false;
+      if(d.ok){
+        settingsUpdates.textContent='Update applied! Restarting...';
+        settingsHint.textContent='The server will restart in 1 second.';
+        fetch('/api/update/restart');
+        setTimeout(function(){location.reload();},2000);
+      }else{
+        settingsUpdates.textContent='Failed: '+(d.error||'unknown');
+        settingsHint.textContent='';
+      }
+    })['catch'](function(){
+      updateApplyBtn.classList.remove('loading');
+      updateApplyBtn.disabled=false;
+      settingsUpdates.textContent='Error applying update.';
+    });
+  });
 })();
 </script>
 </body>
