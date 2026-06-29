@@ -22,6 +22,13 @@ def add_cors(resp):
         resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     return resp
 
+VERSION_FILE = Path(__file__).parent / 'version.txt'
+CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
+
+@app.context_processor
+def inject_version():
+    return {'current_version': CURRENT_VERSION}
+
 UPSTREAM = "https://s1.sportzfytvlive.xyz"
 DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
@@ -446,26 +453,59 @@ def proxy_manifest(slug, idx):
     return Response(body, content_type='application/dash+xml')
 
 
+GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
+GITHUB_RAW = 'https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/refs/heads/master'
+
+@app.route('/api/version')
+def api_version():
+    return jsonify({'ok': True, 'version': CURRENT_VERSION})
+
 @app.route('/api/update/check')
 def update_check():
     try:
-        subprocess.run(['git', 'fetch', 'origin', 'master'], capture_output=True, text=True, timeout=10)
-        r = subprocess.run(['git', 'log', 'HEAD..origin/master', '--oneline'], capture_output=True, text=True, timeout=5)
-        commits = [c.strip() for c in r.stdout.strip().split('\n') if c.strip()]
-        r2 = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, timeout=5)
-        current = r2.stdout.strip()
-        return jsonify({'ok': True, 'current': current, 'commits': commits, 'updates': len(commits) > 0})
+        import urllib.request, json as pyjson
+        req = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            latest = pyjson.loads(r.read())['sha']
+        has_update = latest != CURRENT_VERSION
+        return jsonify({'ok': True, 'current': CURRENT_VERSION[:12], 'latest': latest[:12], 'has_updates': has_update})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
 
 @app.route('/api/update/apply')
 def update_apply():
     try:
-        r = subprocess.run(['git', 'pull', 'origin', 'master'], capture_output=True, text=True, timeout=30)
-        if r.returncode != 0:
-            return jsonify({'ok': False, 'error': r.stderr or r.stdout})
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt', '--quiet'], capture_output=True, timeout=30)
-        return jsonify({'ok': True, 'message': r.stdout.strip()})
+        import urllib.request, zipfile, io, tempfile, shutil
+        base = Path(__file__).parent
+        req = urllib.request.Request(f'{GITHUB_API}/zipball/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            z = zipfile.ZipFile(io.BytesIO(r.read()))
+            extract_dir = Path(tempfile.mkdtemp())
+            z.extractall(extract_dir)
+            subdirs = [d for d in extract_dir.iterdir() if d.is_dir()]
+            src = subdirs[0] if subdirs else extract_dir
+            for item in src.iterdir():
+                if item.name in ('python', 'Zero_live.bat', 'version.txt'): continue
+                dst = base / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dst, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dst)
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        import subprocess as sp
+        pip = str(base / 'python' / 'Scripts' / 'pip.exe')
+        if os.path.exists(pip):
+            sp.run([pip, 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
+        else:
+            sp.run([sys.executable, '-m', 'pip', 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
+        req2 = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(req2, timeout=10) as r:
+            new_sha = json.loads(r.read())['sha']
+        (base / 'version.txt').write_text(new_sha)
+        # Reload current version
+        global CURRENT_VERSION
+        CURRENT_VERSION = new_sha
+        return jsonify({'ok': True, 'message': 'Update applied. Restarting...'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
 

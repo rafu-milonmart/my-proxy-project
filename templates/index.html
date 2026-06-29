@@ -559,7 +559,7 @@ img{max-width:100%;display:block}
     <div class="modal-body" id="settingsBody">
       <div class="field">
         <label>Version</label>
-        <div class="val" id="settingsVersion">Loading...</div>
+        <div class="val" id="settingsVersion">{{ current_version[:12] if current_version != 'unknown' else 'unknown' }}</div>
       </div>
       <div class="field">
         <label>Updates</label>
@@ -892,13 +892,12 @@ img{max-width:100%;display:block}
         return;
       }
       settingsVersion.textContent=d.current||'unknown';
-      if(d.updates&&d.commits.length){
-        settingsUpdates.textContent=d.commits.length+' update(s) available';
+      if(d.has_updates){
+        settingsUpdates.textContent='Update available: '+d.latest;
         settingsUpdates.style.color='var(--live)';
-        updateLog.style.display='block';
-        commitList.innerHTML=d.commits.map(function(c){return '<li>'+E(c)+'</li>';}).join('');
+        updateLog.style.display='none';
         updateApplyBtn.style.display='inline-flex';
-        settingsHint.textContent='Click "Apply Update" to pull the latest code and restart.';
+        settingsHint.textContent='Click "Apply Update" to download and restart.';
       }else{
         settingsUpdates.textContent='Up to date';
         settingsUpdates.style.color='var(--accent-1)';
@@ -909,8 +908,8 @@ img{max-width:100%;display:block}
     })['catch'](function(e){
       updateCheckBtn.classList.remove('loading');
       updateCheckBtn.disabled=false;
-      settingsUpdates.textContent='Offline (not a git repo)';
-      settingsHint.textContent='Update checking requires a git installation.';
+      settingsUpdates.textContent='Offline';
+      settingsHint.textContent='Could not reach GitHub.';
     });
   }
   updateCheckBtn.addEventListener('click',function(){checkUpdates(false);});
