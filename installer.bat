@@ -17,7 +17,7 @@ set GITHUB_REPO=https://github.com/rafu-milonmart/my-proxy-project
 set ZIP_URL=%GITHUB_REPO%/archive/master.zip
 
 REM Step 1: Download portable Python
-echo [1/6] Setting up portable Python...
+echo [1/5] Setting up portable Python...
 if not exist "%PYTHON_DIR%\python.exe" (
     echo   Downloading Python %PYTHON_VERSION% embedded version...
     if not exist "%TEMP%\python-%PYTHON_VERSION%-embed-amd64.zip" (
@@ -57,7 +57,7 @@ REM Show Python version
 echo.
 
 REM Step 2: Download app files from GitHub
-echo [2/6] Downloading app files from GitHub...
+echo [2/5] Downloading app files from GitHub...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile '%TEMP%\zero_live.zip'}"
 if !errorlevel! neq 0 (
@@ -83,34 +83,25 @@ cd /d "%INSTALL_DIR%"
 REM Use portable Python
 set PYTHON=%INSTALL_DIR%\python\python.exe
 
-REM Step 3: Create virtual environment
-echo [3/6] Creating virtual environment...
-if not exist ".venv" (
-    %PYTHON% -m venv .venv
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
-    echo   Virtual environment created.
-) else (
-    echo   Virtual environment already exists.
+REM Step 3: Install dependencies directly (embedded Python is already isolated)
+echo [3/5] Installing dependencies...
+if not exist "requirements.txt" (
+    echo [ERROR] requirements.txt not found! GitHub download may have failed.
+    dir "%INSTALL_DIR%"
+    pause
+    exit /b 1
 )
-echo.
-
-REM Step 4: Install requirements
-echo [4/6] Installing dependencies...
-call .venv\Scripts\activate.bat
-pip install -r requirements.txt
-if %errorlevel% neq 0 (
+%PYTHON% -m pip install -r requirements.txt
+if !errorlevel! neq 0 (
     echo [ERROR] Failed to install dependencies.
     pause
     exit /b 1
 )
+echo   Dependencies installed.
 echo.
 
-REM Step 5: Create desktop shortcuts
-echo [5/6] Creating desktop shortcuts...
+REM Step 4: Create desktop shortcuts
+echo [4/5] Creating desktop shortcuts...
 
 set RUN_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive.lnk
 set UNINSTALL_SHORTCUT=%USERPROFILE%\Desktop\ZeroLive Uninstall.lnk
@@ -146,14 +137,13 @@ if not exist "%UNINSTALL_SHORTCUT%" (
 )
 echo.
 
-REM Step 6: Firewall rule
-echo [6/6] Adding firewall rule for local network access...
-netsh advfirewall firewall add rule name="ZeroLive" dir=in action=allow program="%INSTALL_DIR%\.venv\Scripts\python.exe" profile=private enable=yes >nul 2>&1
+REM Step 5: Firewall rule + README
+echo [5/5] Configuring firewall and README...
+netsh advfirewall firewall add rule name="ZeroLive" dir=in action=allow program="%INSTALL_DIR%\python\python.exe" profile=private enable=yes >nul 2>&1
 if !errorlevel! equ 0 ( echo   Firewall rule added. ) else ( echo   [SKIP] Could not add firewall rule (may need admin). )
 echo.
 
-REM Step 7: Create README
-echo [7/7] Creating README...
+REM README
 set README_FILE=%INSTALL_DIR%\readme.txt
 (
 echo =============================================

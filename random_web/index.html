@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZeroLive Download</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#080b14;--bg-card:#111830;--accent-1:#ff2d55;--accent-2:#7936f7;--text:#eef2ff;--text-secondary:#949dcc;--text-tertiary:#5c6692;--line:rgba(121,54,247,.12);--radius:14px;--radius-sm:10px}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.orb{position:fixed;border-radius:50%;pointer-events:none;z-index:0;filter:blur(80px);animation:orbFloat 12s ease-in-out infinite}
+.orb-1{width:400px;height:400px;background:rgba(255,45,85,.12);top:-100px;right:-100px}
+.orb-2{width:350px;height:350px;background:rgba(121,54,247,.10);bottom:-80px;left:-80px;animation-delay:-4s}
+@keyframes orbFloat{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(20px,-20px) scale(1.05)}}
+.card{position:relative;z-index:1;max-width:480px;width:100%;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius);padding:32px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.logo{font-size:28px;font-weight:900;margin-bottom:4px;background:linear-gradient(135deg,#fff 30%,var(--accent-1),var(--accent-2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sub{color:var(--text-secondary);font-size:14px;margin-bottom:24px}
+.dl-btn{display:inline-flex;align-items:center;gap:8px;padding:14px 32px;border-radius:var(--radius-sm);background:linear-gradient(135deg,var(--accent-1),var(--accent-2));color:#fff;font-size:15px;font-weight:700;text-decoration:none;transition:all .25s;border:none;cursor:pointer}
+.dl-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(255,45,85,.3)}
+.dl-btn svg{width:18px;height:18px}
+.features{text-align:left;margin:24px 0;padding:0;list-style:none}
+.features li{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text-secondary);border-bottom:1px solid var(--line)}
+.features li:last-child{border-bottom:none}
+.features li svg{flex-shrink:0;color:var(--accent-2)}
+.steps{text-align:left;margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+.steps h3{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text-tertiary);margin-bottom:12px}
+.steps ol{padding-left:20px;font-size:13px;color:var(--text-secondary);line-height:1.8}
+.steps ol li::marker{color:var(--accent-2);font-weight:700}
+@media(max-width:500px){.card{padding:20px}}
+</style>
+</head>
+<body>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="card">
+  <div class="logo">ZEROLIVE</div>
+  <div class="sub">Free sports streaming for your PC</div>
+
+  <button class="dl-btn" id="dlBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+    <span id="dlText">Download for Windows</span>
+  </button>
+  <p style="font-size:11px;color:var(--text-tertiary);margin-top:8px" id="dlStatus"></p>
+  <script>
+    document.getElementById('dlBtn').addEventListener('click',function(){
+      var btn=this,text=document.getElementById('dlText'),status=document.getElementById('dlStatus');
+      text.textContent='Downloading...';btn.style.opacity='.6';btn.style.pointerEvents='none';
+      status.textContent='Fetching latest installer from GitHub...';
+      fetch('https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/master/installer.bat')
+        .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+        .then(function(blob){
+          var a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download='installer.bat';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+          text.textContent='Download for Windows';btn.style.opacity='1';btn.style.pointerEvents='auto';
+          status.textContent='';
+        })
+        ['catch'](function(e){
+          text.textContent='Download for Windows';btn.style.opacity='1';btn.style.pointerEvents='auto';
+          status.textContent='Download failed. Try right-click → Save link as: https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/master/installer.bat';
+        });
+    });
+  </script>
+
+  <ul class="features">
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Live football, cricket, basketball, tennis &amp; more</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Auto-retry on failure with fallback servers</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Multiple theme options (Dark, Light, Cyberpunk, Matrix + more)</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> VLC / IPTV app support via M3U download</li>
+    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Completely free — no registration, no ads</li>
+  </ul>
+
+  <div class="steps">
+    <h3>How to Install</h3>
+    <ol>
+      <li>Download the <strong>installer.bat</strong> file above</li>
+      <li>Run <strong>installer.bat</strong> — it will set up Python &amp; dependencies</li>
+      <li>Run <strong>run.bat</strong> to start the app</li>
+      <li>Your browser will open automatically to <strong>http://127.0.0.1:9090</strong></li>
+    </ol>
+  </div>
+</div>
+</body>
+</html>

@@ -1,19 +1,20 @@
 @echo off
 cd /d "%~dp0"
 title ZeroLive
+setlocal enabledelayedexpansion
 
-REM Activate venv
-if not exist ".venv" (
-    echo [ERROR] Virtual environment not found. Run installer.bat first.
+set PYTHON=%~dp0python\python.exe
+
+if not exist "%PYTHON%" (
+    echo [ERROR] Python not found. Run installer.bat first.
     pause
     exit /b 1
 )
-call .venv\Scripts\activate.bat
 
 REM Check for updates (silently)
 echo Checking for updates...
 git fetch origin master >nul 2>&1
-if %errorlevel% equ 0 (
+if !errorlevel! equ 0 (
     for /f %%i in ('git log HEAD..origin/master --oneline 2^>nul') do set UPDATES=%%i
     if defined UPDATES (
         echo.
@@ -24,10 +25,9 @@ if %errorlevel% equ 0 (
         if not errorlevel 2 (
             echo Pulling updates...
             git pull origin master
-            if %errorlevel% equ 0 (
+            if !errorlevel! equ 0 (
                 echo Updates applied! Restarting...
-                call .venv\Scripts\activate.bat
-                pip install -r requirements.txt --quiet
+                "%PYTHON%" -m pip install -r requirements.txt --quiet
             ) else (
                 echo [WARNING] Update failed. Starting with current version.
             )
@@ -46,10 +46,10 @@ REM Start app
 echo Starting ZeroLive...
 start "" http://127.0.0.1:9090
 set PORT=9090
-python app.py
+"%PYTHON%" app.py
 
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
     echo.
-    echo App exited with error code %errorlevel%.
+    echo App exited with error code !errorlevel!.
     pause
 )
