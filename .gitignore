@@ -1,8 +1,8 @@
 __pycache__/
 *.pyc
-*.pyo
-.vscode/
-.idea/
-*.egg-info/
-dist/
-build/
+.gitignore.swp
+*.swp
+.DS_Store
+*.bat
+!installer.bat
+!run.bat
