@@ -361,6 +361,14 @@ img{max-width:100%;display:block}
   transition:all .2s;white-space:nowrap;
 }
 .btn-vlc:hover{background:rgba(255,117,24,.1);border-color:rgba(255,117,24,.35)}
+.btn-copym3u{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 8px;border-radius:var(--radius-sm);
+  font-size:10px;font-weight:700;color:var(--accent-2);
+  border:1px solid rgba(121,54,247,.2);
+  transition:all .2s;white-space:nowrap;
+}
+.btn-copym3u:hover{background:rgba(121,54,247,.1);border-color:rgba(121,54,247,.35)}
 
 .skeleton-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;
@@ -523,6 +531,7 @@ img{max-width:100%;display:block}
       <button class="btn-icon" id="settingsBtn" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
       <button class="btn-icon" id="refreshBtn" title="Refresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>
       <a href="/playlist.m3u" class="btn-m3u" download><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 20 8-12-8-4-4 8z"/><path d="M14 20h8"/><path d="M18 16v4"/></svg>M3U</a>
+      <a href="/faster" class="btn-m3u" style="background:transparent;border-color:var(--text-tertiary);color:var(--text-tertiary);font-size:10px">Lite</a>
     </div>
   </div>
 </header>
@@ -757,7 +766,8 @@ img{max-width:100%;display:block}
         '<div class="event-bottom">'+
           '<span style="display:flex;align-items:center;gap:6px">'+
             '<span class="event-cta">'+icon+' '+(live?'Watch Live':soon?'View Stream':'View Stream')+'</span>'+
-            '<span class="btn-vlc" data-vlc-slug="'+E(slug)+'" onclick="event.stopPropagation();openInVLC(this.dataset.vlcSlug)" title="Open in VLC">VLC</span>'+
+            '<span class="btn-vlc" data-vlc-slug="'+E(slug)+'" onclick="event.stopPropagation();openInVLC(this.dataset.vlcSlug)" title="Download M3U">VLC</span>'+
+            '<span class="btn-copym3u" data-copy-slug="'+E(slug)+'" onclick="event.stopPropagation();copyM3ULink(this.dataset.copySlug)" title="Copy M3U Link">M3U</span>'+
           '</span>'+
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-tertiary);opacity:.35"><path d="M9 18l6-6-6-6"/></svg>'+
         '</div></a>';
@@ -834,6 +844,29 @@ img{max-width:100%;display:block}
     document.body.removeChild(a);
     showToast('Downloaded! Open the .m3u file with VLC Media Player.');
   };
+
+  window.copyM3ULink = function(slug) {
+    var url = window.location.origin + '/playlist/' + encodeURIComponent(slug) + '.m3u';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function() {
+        showToast('M3U link copied to clipboard!', 'success');
+      })['catch'](function() {
+        fallbackCopy(url);
+      });
+    } else {
+      fallbackCopy(url);
+    }
+  };
+  function fallbackCopy(url) {
+    var ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); showToast('M3U link copied!', 'success'); }
+    catch(e) { showToast('Failed to copy link', 'error'); }
+    document.body.removeChild(ta);
+  }
 
   function showToast(msg) {
     var t = document.createElement('div');

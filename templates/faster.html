@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZeroLive Lite</title>
+</head>
+<body style="font-family:sans-serif;font-size:14px;line-height:1.5;background:#fff;color:#000;margin:0;padding:0" id="body">
+
+<!-- Header -->
+<div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:8px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+  <b>ZEROLIVE LITE</b>
+  <input id="search" placeholder="Search teams, leagues..." style="flex:1;min-width:140px;padding:4px 8px;font-size:13px;border:1px solid #ccc;border-radius:4px">
+  <select id="themeSelect" style="font-size:12px;padding:3px 6px"></select>
+  <button id="favFilterBtn" style="font-size:12px;padding:3px 8px;cursor:pointer" title="Favorites only">&#9733; Favorites</button>
+  <span id="channelCount" style="font-size:12px;color:#666">0 events</span>
+  <span id="headerClock" style="font-size:12px;color:#666"></span>
+  <button id="settingsBtn" style="font-size:12px;padding:3px 8px;cursor:pointer">Settings</button>
+  <button id="refreshBtn" style="font-size:12px;padding:3px 8px;cursor:pointer">Refresh</button>
+  <a href="/playlist.m3u" download style="font-size:12px;padding:3px 8px;border:1px solid #ccc;border-radius:4px;text-decoration:none;color:#000">M3U</a>
+  <a href="/" style="font-size:11px;color:#888">Full UI</a>
+</div>
+
+<!-- Filter bar -->
+<div id="filterBar" style="padding:6px 12px;border-bottom:1px solid #eee;display:flex;gap:6px;flex-wrap:wrap"></div>
+
+<!-- Events list -->
+<div id="eventsGrid" style="padding:8px 12px"></div>
+
+<!-- Warning banner -->
+<div id="warningBanner" style="display:none;background:#fff3cd;border-bottom:1px solid #ffc107;padding:6px 12px;font-size:13px">
+  Only works on this PC & local network.
+  <button id="warnClose" style="float:right;border:none;background:none;font-size:16px;cursor:pointer;padding:0">&times;</button>
+</div>
+
+<!-- Settings modal -->
+<div id="settingsModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:999">
+  <div style="background:#fff;max-width:380px;margin:80px auto;padding:20px;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2)">
+    <div style="font-weight:700;font-size:16px;margin-bottom:12px">Settings
+      <button id="settingsClose" style="float:right;border:none;background:none;font-size:18px;cursor:pointer">&times;</button>
+    </div>
+    <div><b>Version</b><br><span id="settingsVersion">{{ current_version[:12] if current_version != 'unknown' else 'unknown' }}</span></div>
+    <div style="margin-top:8px"><b>Updates</b><br><span id="settingsUpdates">Check for updates...</span><br><span id="settingsHint" style="font-size:12px;color:#666"></span></div>
+    <div style="margin-top:10px;display:flex;gap:6px">
+      <button class="modal-btn" id="updateCheckBtn" style="padding:4px 12px;cursor:pointer">Check for Updates</button>
+      <button class="modal-btn" id="updateApplyBtn" style="display:none;padding:4px 12px;cursor:pointer">Apply Update</button>
+    </div>
+    <div id="updateLog" style="display:none;margin-top:8px;font-size:12px"></div>
+  </div>
+</div>
+
+<!-- Shortcuts modal -->
+<div id="shortcutsModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:999">
+  <div style="background:#fff;max-width:360px;margin:80px auto;padding:20px;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.2)">
+    <div style="font-weight:700;font-size:16px;margin-bottom:12px">Shortcuts
+      <button id="shortcutsClose" style="float:right;border:none;background:none;font-size:18px;cursor:pointer">&times;</button>
+    </div>
+    <div style="font-size:13px">
+      <div><kbd>?</kbd> — Help</div>
+      <div><kbd>/</kbd> — Search</div>
+      <div><kbd>R</kbd> — Refresh</div>
+      <div><kbd>F</kbd> — Favorites filter</div>
+      <div><kbd>1</kbd>-<kbd>9</kbd> — Filter by sport</div>
+      <div><kbd>Esc</kbd> — Close / clear search</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
+  var INIT=function(n){return (n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(function(w){return w[0].toUpperCase();}).join('');};
+  var ESC_INIT=function(n){return E(INIT(n));};
+  var SPORT_COLORS={Football:'#ff2d55',Cricket:'#7936f7',Basketball:'#ff6b35',Tennis:'#facc15',Hockey:'#06b6d4',Baseball:'#a855f7','Formula 1':'#ef4444',F1:'#ef4444',Esports:'#22d65e',MMA:'#dc2626',WWE:'#ef4444'};
+  var sportColor=function(s){return SPORT_COLORS[s]||'#6b7280';};
+  var THEMES=['dark','light','amethyst','emerald','ruby','ocean','cyberpunk','sunset','nord','matrix','midnight'];
+
+  var FAVS_KEY='zl-favs';
+  function loadFavs(){try{return JSON.parse(localStorage.getItem(FAVS_KEY))||[]}catch(e){return[]}}
+  function saveFavs(){localStorage.setItem(FAVS_KEY,JSON.stringify(FAVS))}
+  var FAVS=loadFavs();
+  window.toggleFav=function(slug){
+    var idx=FAVS.indexOf(slug);
+    if(idx===-1){FAVS.push(slug);showToast('Added to favorites')}
+    else{FAVS.splice(idx,1);showToast('Removed from favorites')}
+    saveFavs();render();
+  };
+
+  var RECENT_KEY='zl-recent';
+  function loadRecent(){try{return JSON.parse(localStorage.getItem(RECENT_KEY))||[]}catch(e){return[]}}
+  function saveRecent(r){localStorage.setItem(RECENT_KEY,JSON.stringify(r))}
+  function addRecent(slug,name){
+    var r=loadRecent();
+    r=r.filter(function(i){return i.slug!==slug});
+    r.unshift({slug:slug,name:name,ts:Date.now()});
+    if(r.length>10)r=r.slice(0,10);
+    saveRecent(r);
+  }
+
+  function updateClock(){
+    var el=document.getElementById('headerClock');
+    if(el)el.textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  }
+  updateClock();setInterval(updateClock,1000);
+
+  var themeSelect=document.getElementById('themeSelect');
+  themeSelect.innerHTML=THEMES.map(function(t){return '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'}).join('');
+  var currentTheme=localStorage.getItem('zl-theme')||'dark';
+  function applyTheme(t){
+    document.documentElement.setAttribute('data-theme',t);
+    localStorage.setItem('zl-theme',t);
+    themeSelect.value=t;
+  }
+  applyTheme(currentTheme);
+  themeSelect.addEventListener('change',function(){applyTheme(themeSelect.value)});
+
+  function showToast(msg,type){
+    var t=document.createElement('div');
+    t.textContent=msg;
+    Object.assign(t.style,{position:'fixed',bottom:'16px',left:'50%',transform:'translateX(-50%)',background:'#333',color:'#fff',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',zIndex:'9999'});
+    document.body.appendChild(t);
+    setTimeout(function(){t.remove()},3000);
+  }
+
+  var events=[];
+  window.activeSport='All';
+  window.showingFavs=false;
+  var query='';
+  var search=document.getElementById('search');
+  var filterBar=document.getElementById('filterBar');
+  var grid=document.getElementById('eventsGrid');
+  var refreshBtn=document.getElementById('refreshBtn');
+  var favFilterBtn=document.getElementById('favFilterBtn');
+  var channelCount=document.getElementById('channelCount');
+
+  function getStatus(e){
+    var now=Date.now();
+    var t=Date.parse(e.starts_at);
+    if(e.is_live===1) return {type:'live',label:'LIVE',cls:''};
+    if(!t) return {type:'upcoming',label:'?',cls:''};
+    var diff=t-now;
+    if(diff<0) return {type:'live',label:'LIVE',cls:''};
+    if(diff<3600000) return {type:'soon',label:'SOON',cls:''};
+    return {type:'upcoming',label:'',cls:''};
+  }
+
+  function getTimeDisplay(e){
+    var now=Date.now();
+    var t=Date.parse(e.starts_at);
+    if(!t)return'';
+    var diff=t-now;
+    if(diff<0){
+      var ago=Math.floor(-diff/1000);
+      if(ago<60)return'moments ago';
+      if(ago<3600)return Math.floor(ago/60)+'m ago';
+      if(ago<86400)return Math.floor(ago/3600)+'h '+Math.floor((ago%3600)/60)+'m';
+      return Math.floor(ago/86400)+'d ago';
+    }else if(diff<3600000){
+      var min=Math.floor(diff/60000);
+      return min<1?'now':'in '+min+'m';
+    }
+    return new Date(t).toLocaleString();
+  }
+
+  window.render = function(){ render(); };
+  window.renderFilters = function(){ renderFilters(); };
+  function render(){
+    var q=query.trim().toLowerCase();
+    var f=events.filter(function(e){
+      var slug=e.enc_parent||e.parent||e.id;
+      var s=getStatus(e);
+      if(window.activeSport==='__live__'&&s.type!=='live')return false;
+      if(window.activeSport!=='All'&&window.activeSport!=='__live__'&&e.sport!==window.activeSport)return false;
+      if(window.showingFavs&&FAVS.indexOf(slug)===-1)return false;
+      if(!q)return true;
+      return (e.team_a_name||'').toLowerCase().includes(q)||(e.team_b_name||'').toLowerCase().includes(q)||(e.league||'').toLowerCase().includes(q);
+    });
+    f.sort(function(a,b){return (a.priority||0)-(b.priority||0)});
+    if(!f.length){
+      grid.innerHTML='<div style="padding:40px;text-align:center;color:#666">'+(window.showingFavs?'No favorites yet. Star events to add them.':'No events found.')+'</div>';
+      return;
+    }
+    grid.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+      '<thead><tr style="background:#f0f0f0">'+
+      '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Sport</th>'+
+      '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Match</th>'+
+      '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">League</th>'+
+      '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Time</th>'+
+      '<th style="padding:6px 8px;border-bottom:1px solid #ddd"></th>'+
+      '</tr></thead><tbody>'+
+      f.map(function(e){
+        var slug=e.enc_parent||e.parent||e.id;
+        var s=getStatus(e);
+        var timeStr=getTimeDisplay(e);
+        var isFav=FAVS.indexOf(slug)!==-1;
+        var favStar=isFav?'★':'☆';
+        return '<tr>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #eee">'+E(e.sport||'?')+'</td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #eee;font-weight:600">'+
+            '<a href="/lite/'+encodeURIComponent(slug)+'" style="color:#000;text-decoration:none">'+E(e.team_a_name)+' vs '+E(e.team_b_name)+'</a>'+
+          '</td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666">'+E(e.league||'')+'</td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;white-space:nowrap">'+(s.label?'<b>'+s.label+'</b> ':'')+timeStr+'</td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #eee;white-space:nowrap">'+
+            '<span style="cursor:pointer;font-size:16px" onclick="event.stopPropagation();toggleFav(\''+E(slug)+'\')" title="Favorite">'+favStar+'</span> '+
+            '<a href="/playlist/'+encodeURIComponent(slug)+'.m3u" download style="font-size:11px;color:#666;margin-left:4px">M3U</a>'+
+            '<a href="/lite/'+encodeURIComponent(slug)+'" style="font-size:11px;color:#888;margin-left:4px">Watch</a>'+
+          '</td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>';
+  }
+
+  function renderFilters(){
+    var counts=new Map();counts.set('All',events.length);
+    var liveCount=0;var nowCount=0;
+    for(var i=0;i<events.length;i++){
+      var e=events[i];var s=e.sport||'Other';
+      counts.set(s,(counts.get(s)||0)+1);
+      if(getStatus(e).type==='live')liveCount++;
+    }
+    channelCount.textContent=events.length+' events';
+    var sports=['All'];
+    var keys=Array.from(counts.keys()).filter(function(s){return s!=='All'}).sort();
+    sports=sports.concat(keys);
+    filterBar.innerHTML=sports.map(function(s){
+      return '<button onclick="window.activeSport=\''+E(s)+'\';window.showingFavs=false;renderFilters();render()" style="'+(window.activeSport===s?'background:#ddd;':'background:#f5f5f5;')+'border:1px solid #ccc;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer">'+E(s)+' ('+(counts.get(s)||0)+')</button>';
+    }).join('');
+    if(liveCount){
+      var b=document.createElement('button');
+      b.textContent='LIVE ('+liveCount+')';
+      b.onclick=function(){window.activeSport='__live__';window.showingFavs=false;renderFilters();render()};
+      Object.assign(b.style,{background:'#ffe0e0','border':'1px solid #ff4444','borderRadius':'4px','padding':'3px 8px','fontSize':'12px','cursor':'pointer'});
+      filterBar.prepend(b);
+    }
+  }
+
+  search.addEventListener('input',function(e){query=e.target.value;render()});
+
+  favFilterBtn.addEventListener('click',function(){
+    window.showingFavs=!window.showingFavs;
+    window.activeSport='All';
+    renderFilters();render();
+  });
+
+  function loadEvents(){
+    refreshBtn.textContent='...';
+    fetch('/api/upstream/events',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
+      events=(data&&Array.isArray(data.events))?data.events:(Array.isArray(data)?data:[]);
+      renderFilters();render();
+    })['catch'](function(){grid.innerHTML='<div style="padding:40px;text-align:center;color:#666">Failed to load.</div>'});
+    refreshBtn.textContent='Refresh';
+  }
+  refreshBtn.addEventListener('click',loadEvents);
+  loadEvents();
+
+  setInterval(function(){
+    fetch('/api/upstream/events',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
+      events=(data&&Array.isArray(data.events))?data.events:(Array.isArray(data)?data:[]);
+      renderFilters();render();
+    })['catch'](function(){});
+  },60000);
+
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href^="/lite/"]');
+    if(a){
+      var parts=a.pathname.split('/');
+      var slug=parts[parts.length-1];
+      var txt=a.textContent.trim();
+      addRecent(slug,txt);
+    }
+  });
+
+  /* Warning */
+  if(!localStorage.getItem('zl-warn-dismissed'))document.getElementById('warningBanner').style.display='block';
+  document.getElementById('warnClose').addEventListener('click',function(){
+    document.getElementById('warningBanner').style.display='none';
+    localStorage.setItem('zl-warn-dismissed','1');
+  });
+
+  /* Settings */
+  var sm=document.getElementById('settingsModal');
+  document.getElementById('settingsBtn').addEventListener('click',function(){sm.style.display='block';checkUpdates(true)});
+  document.getElementById('settingsClose').addEventListener('click',function(){sm.style.display='none'});
+  sm.addEventListener('click',function(e){if(e.target===sm)sm.style.display='none'});
+  function checkUpdates(silent){
+    var btn=document.getElementById('updateCheckBtn');
+    var text=document.getElementById('settingsUpdates');
+    var hint=document.getElementById('settingsHint');
+    btn.disabled=true;btn.textContent='Checking...';
+    fetch('/api/update/check').then(function(r){return r.json()}).then(function(d){
+      btn.disabled=false;btn.textContent='Check for Updates';
+      if(!d.ok){text.textContent='Error';hint.textContent='';return}
+      document.getElementById('settingsVersion').textContent=d.current||'unknown';
+      if(d.has_updates){
+        text.innerHTML='<b style="color:#c00">Update: '+d.latest+'</b>';
+        document.getElementById('updateApplyBtn').style.display='inline-block';
+        hint.textContent='Click Apply to update.';
+      }else{
+        text.textContent='Up to date';
+        document.getElementById('updateApplyBtn').style.display='none';
+        hint.textContent=silent?'':'No updates.';
+      }
+    })['catch'](function(){btn.disabled=false;btn.textContent='Check for Updates';text.textContent='Offline';hint.textContent='Could not reach GitHub.'});
+  }
+  document.getElementById('updateCheckBtn').addEventListener('click',function(){checkUpdates(false)});
+  document.getElementById('updateApplyBtn').addEventListener('click',function(){
+    var btn=document.getElementById('updateApplyBtn');
+    btn.disabled=true;btn.textContent='Applying...';
+    fetch('/api/update/apply').then(function(r){return r.json()}).then(function(d){
+      if(d.ok){
+        document.getElementById('settingsUpdates').textContent='Applied! Restarting...';
+        fetch('/api/update/restart');
+        setTimeout(function(){location.reload()},2000);
+      }else{document.getElementById('settingsUpdates').textContent='Failed';btn.disabled=false;btn.textContent='Apply Update'}
+    })['catch'](function(){btn.disabled=false;btn.textContent='Apply Update'});
+  });
+
+  /* Shortcuts */
+  var scm=document.getElementById('shortcutsModal');
+  document.getElementById('shortcutsClose').addEventListener('click',function(){scm.style.display='none'});
+  scm.addEventListener('click',function(e){if(e.target===scm)scm.style.display='none'});
+
+  /* Keyboard */
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+    if(e.key==='?'){scm.style.display=scm.style.display==='none'?'block':'none';e.preventDefault()}
+    else if(e.key==='/'){search.focus();search.select();e.preventDefault()}
+    else if(e.key==='r'||e.key==='R'){loadEvents();e.preventDefault()}
+    else if(e.key==='f'||e.key==='F'){favFilterBtn.click();e.preventDefault()}
+    else if(e.key==='Escape'){
+      if(sm.style.display==='block')sm.style.display='none';
+      else if(scm.style.display==='block')scm.style.display='none';
+      else if(query){query='';search.value='';render()}
+    }
+    else if(e.key>='1'&&e.key<='9'){
+      var btns=filterBar.querySelectorAll('button');
+      var idx=parseInt(e.key)-1;
+      if(btns[idx])btns[idx].click();e.preventDefault();
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from pathlib import Path
 from flask import Flask, send_from_directory, Response, request, jsonify, render_template
@@ -9,35 +10,26 @@ try:
 except ImportError:
     HAS_CRYPTO = False
 
-app = Flask(__name__)
-app.config['TEMPLATES_AUTO_RELOAD'] = True
-logging.basicConfig(level=logging.INFO)
-
-
-@app.after_request
-def add_cors(resp):
-    if request.path.startswith(('/stream/', '/proxy/', '/api/', '/playlist.')):
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Access-Control-Allow-Headers'] = '*'
-        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-    return resp
-
-VERSION_FILE = Path(__file__).parent / 'version.txt'
-CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
-
-@app.context_processor
-def inject_version():
-    return {'current_version': CURRENT_VERSION}
-
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 UPSTREAM = "https://s1.sportzfytvlive.xyz"
 DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
-M3U_CACHE = {"time": 0, "data": ""}
-M3U_CACHE_TTL = 30
-M3U_CACHE_LOCK = threading.Lock()
-_EVENTS_CACHE = {"time": 0, "data": []}
-_EVENTS_CACHE_LOCK = threading.Lock()
-_EVENTS_CACHE_TTL = 15
+VERSION_FILE = STATIC_DIR / 'version.txt'
+CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
+GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
+DEBUG = os.environ.get('ZL_DEBUG', '0') == '1'
+
+app = Flask(__name__)
+app.config['TEMPLATES_AUTO_RELOAD'] = DEBUG
+
+if not DEBUG:
+    logging.disable(logging.CRITICAL)
+
+_POOL = ThreadPoolExecutor(max_workers=16)
+_tlocal = threading.local()
+
 _http_headers = {
     "Accept": "application/json",
     "X-Requested-With": "lsp",
@@ -49,212 +41,223 @@ _media_headers = {
     "X-Requested-With": "lsp",
     "X-LSP-Enc": "1",
 }
-_tlocal = threading.local()
 
+# ---------------------------------------------------------------------------
+# Lock-free caches: dict with (timestamp, value) tuples, no locks
+# ---------------------------------------------------------------------------
+_ev_cache = {}       # key -> (ts, data)
+_pb_cache = {}       # slug -> (ts, streams_list)
+_m3u_cache_val = None
+_m3u_cache_ts = 0
+_DECRYPT_KEY_CACHE = {}
 
-def get_http():
+_EV_TTL = 15
+_PB_TTL = 30
+_M3U_TTL = 30
+
+def _cached(key, ttl, fetcher, store=None):
+    """Atomic cache get-or-set. No locks — cheap dict read wins."""
+    now = time.time()
+    store = store or _ev_cache
+    hit = store.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    try:
+        val = fetcher()
+        store[key] = (time.time(), val)
+        return val
+    except Exception:
+        return hit[1] if hit else []
+
+def _pb_cached(slug):
+    now = time.time()
+    hit = _pb_cache.get(slug)
+    if hit and now - hit[0] < _PB_TTL:
+        return hit[1]
+    try:
+        servers = _fetch_playback(slug)
+        streams = []
+        if servers:
+            r = _decrypt(servers[0]['enc'], str(servers[0]['bucket']))
+            if r and 'streams' in r:
+                streams = r['streams']
+        _pb_cache[slug] = (time.time(), streams)
+        return streams
+    except Exception:
+        return hit[1] if hit else []
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+def _sess():
     if not hasattr(_tlocal, "session"):
         _tlocal.session = curl_requests.Session(headers=_http_headers, impersonate="chrome124", timeout=15)
     return _tlocal.session
 
-
-def get_media_http():
+def _media_sess():
     if not hasattr(_tlocal, "media_session"):
         _tlocal.media_session = curl_requests.Session(headers=_media_headers, impersonate="chrome124", timeout=30)
     return _tlocal.media_session
 
-
-def http_get(url: str) -> tuple[int, str]:
-    for attempt in range(2):
+def _http_get(url, raw=False):
+    for _ in range(2):
         try:
-            r = get_http().get(url)
+            r = _sess().get(url)
             if r.status_code == 200:
-                return r.status_code, r.text
-            logging.warning(f"http_get attempt {attempt+1} got {r.status_code} for {url}")
-        except Exception as e:
-            logging.warning(f"http_get attempt {attempt+1} failed: {e}")
-    return 0, ""
+                return (r.content, r.text, r.headers.get('content-type', '')) if raw else (r.status_code, r.text)
+        except Exception:
+            pass
+    return (b'', '', '') if raw else (0, '')
 
-def http_get_raw(url: str) -> tuple[int, bytes, str]:
-    for attempt in range(2):
-        try:
-            r = get_http().get(url)
-            if r.status_code == 200:
-                return r.status_code, r.content, r.headers.get('content-type', 'application/octet-stream')
-            logging.warning(f"http_get_raw attempt {attempt+1} got {r.status_code} for {url}")
-        except Exception as e:
-            logging.warning(f"http_get_raw attempt {attempt+1} failed: {e}")
-    return 0, b"", ""
-
-
-def fetch_events():
-    now = time.time()
-    if now - _EVENTS_CACHE["time"] < _EVENTS_CACHE_TTL:
-        return _EVENTS_CACHE["data"]
+# ---------------------------------------------------------------------------
+# Playback
+# ---------------------------------------------------------------------------
+def _fetch_playback(slug):
+    _, body = _http_get(f"{UPSTREAM}/api/upstream/playback/{slug}")
+    if not body:
+        return []
     try:
-        st, body = http_get(f"{UPSTREAM}/api/upstream/events")
-        if st != 200:
-            return []
-        data = json.loads(body)
-        if isinstance(data, list):
-            result = data
-        elif isinstance(data, dict):
-            if 'events' in data and isinstance(data['events'], list):
-                result = data['events']
-            elif 'data' in data:
-                v = data['data']
-                if isinstance(v, list):
-                    result = v
-                elif isinstance(v, dict) and 'events' in v and isinstance(v['events'], list):
-                    result = v['events']
-                else:
-                    result = []
-            else:
-                found = []
-                for k in ('matches', 'result'):
-                    if k in data and isinstance(data[k], list):
-                        found = data[k]
-                        break
-                result = found
-        else:
-            result = []
-        with _EVENTS_CACHE_LOCK:
-            _EVENTS_CACHE["time"] = time.time()
-            _EVENTS_CACHE["data"] = result
-        return result
-    except Exception as e:
-        logging.warning(f"fetch_events failed: {e}")
+        d = json.loads(body)
+        if isinstance(d, dict) and 'enc' in d:
+            return [d]
+        return d if isinstance(d, list) else []
+    except Exception:
         return []
 
+def _decrypt_key(bucket):
+    k = _DECRYPT_KEY_CACHE.get(bucket)
+    if not k:
+        k = hashlib.sha256(f"{DECRYPT_KEY}|lsp-v1|{bucket}".encode()).digest()
+        _DECRYPT_KEY_CACHE[bucket] = k
+    return k
 
-def fetch_playback(slug: str):
-    try:
-        st, body = http_get(f"{UPSTREAM}/api/upstream/playback/{slug}")
-        if st != 200:
-            return []
-        data = json.loads(body)
-        if isinstance(data, dict) and 'enc' in data:
-            return [data]
-        if isinstance(data, list):
-            return data
-        return []
-    except Exception as e:
-        logging.warning(f"fetch_playback({slug}) failed: {e}")
-        return []
-
-
-def decrypt_payload(enc_b64: str, bucket: str) -> dict | None:
+def _decrypt(enc_b64, bucket):
     if not HAS_CRYPTO:
         return None
     try:
         buf = base64.b64decode(enc_b64)
         iv, ct, tag = buf[:12], buf[12:-16], buf[-16:]
-        key = hashlib.sha256(f"{DECRYPT_KEY}|lsp-v1|{bucket}".encode()).digest()
-        pt = AESGCM(key).decrypt(iv, ct + tag, None)
+        pt = AESGCM(_decrypt_key(bucket)).decrypt(iv, ct + tag, None)
         return json.loads(pt.decode())
-    except Exception as e:
-        logging.warning(f"Decrypt failed: {e}")
+    except Exception:
         return None
 
+def _resolve_one(slug):
+    streams = _pb_cached(slug)
+    for s in streams:
+        u = s.get('stream_url', '')
+        if '.m3u8' in u:
+            return u
+    return streams[0]['stream_url'] if streams else None
 
-def resolve_playback_url(slug: str) -> str | None:
-    servers = fetch_playback(slug)
-    if not servers:
-        return None
-    result = decrypt_payload(servers[0]['enc'], str(servers[0]['bucket']))
-    if result and 'streams' in result and result['streams']:
-        for s in result['streams']:
-            u = s.get('stream_url', '')
-            if '.m3u8' in u:
-                return u
-        return result['streams'][0].get('stream_url', '')
-    return None
+def _resolve_many(slugs):
+    fut = {_POOL.submit(_resolve_one, s): s for s in slugs}
+    out = {}
+    for f in as_completed(fut, timeout=30):
+        try:
+            out[fut[f]] = f.result()
+        except Exception:
+            out[fut[f]] = None
+    return out
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+@app.after_request
+def add_cors(resp):
+    if request.path.startswith(('/stream/', '/proxy/', '/api/', '/playlist.')):
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    return resp
+
+@app.context_processor
+def inject_version():
+    return {'current_version': CURRENT_VERSION}
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+@app.route('/faster')
+def faster():
+    return render_template('faster.html')
 
 @app.route('/watch/<slug>')
 def watch(slug):
-    servers = fetch_playback(slug)
-    streams = []
-    if servers:
-        srv = servers[0]
-        result = decrypt_payload(srv['enc'], str(srv['bucket']))
-        if result and 'streams' in result:
-            streams = result['streams']
+    ev_fut = _POOL.submit(lambda: _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache))
+    streams = _pb_cached(slug)
+    events = ev_fut.result()
     event = None
-    for e in fetch_events():
+    for e in events:
         if e.get('enc_parent') == slug or e.get('parent') == slug or e.get('id') == slug:
             event = e
             break
     return render_template('watch.html', slug=slug, event=event, streams=streams)
 
+@app.route('/lite/<slug>')
+def watch_lite(slug):
+    ev_fut = _POOL.submit(lambda: _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache))
+    streams = _pb_cached(slug)
+    events = ev_fut.result()
+    event = None
+    for e in events:
+        if e.get('enc_parent') == slug or e.get('parent') == slug or e.get('id') == slug:
+            event = e
+            break
+    return render_template('watch_lite.html', slug=slug, event=event, streams=streams)
 
 @app.route('/stream/<slug>/<int:idx>')
 def stream_json(slug, idx):
-    servers = fetch_playback(slug)
-    if not servers:
-        return jsonify({"error": "No servers found"}), 404
-    srv = servers[0]
-    result = decrypt_payload(srv['enc'], str(srv['bucket']))
-    if result and 'streams' in result and 0 <= idx < len(result['streams']):
-        s = result['streams'][idx]
-        return jsonify({
-            "url": s['stream_url'],
-            "type": s.get('stream_type', ''),
-            "drm": {
-                "key": s.get('drm_key', ''),
-                "kid": s.get('drm_kid', ''),
-            } if s.get('drm_key') else None,
-        })
-    return jsonify({"error": "Invalid stream index or decryption failed"}), 500
-
+    streams = _pb_cached(slug)
+    if not streams or idx >= len(streams):
+        return jsonify({"error": "Not found"}), 404
+    s = streams[idx]
+    return jsonify({
+        "url": s['stream_url'],
+        "type": s.get('stream_type', ''),
+        "drm": {"key": s['drm_key'], "kid": s['drm_kid']} if s.get('drm_key') else None,
+    })
 
 @app.route('/playlist.m3u')
 def playlist_m3u():
-    if time.time() - M3U_CACHE["time"] >= M3U_CACHE_TTL:
-        events = fetch_events()
-        with M3U_CACHE_LOCK:
-            if time.time() - M3U_CACHE["time"] >= M3U_CACHE_TTL:
-                lines = ["#EXTM3U"]
-                for ev in events:
-                    slug = ev.get('enc_parent') or ev.get('parent') or ev.get('id')
-                    if not slug:
-                        continue
-                    title = f"{ev.get('team_a_name', '?')} vs {ev.get('team_b_name', '?')}"
-                    league = ev.get('league', '')
-                    sport = ev.get('sport', 'Sports')
-                    group = sport + (" - " + league if league else "")
-                    url = resolve_playback_url(slug)
-                    if url:
-                        lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{title}" group-title="{group}",{title}')
-                        lines.append(url)
-                M3U_CACHE["data"] = "\n".join(lines)
-                M3U_CACHE["time"] = time.time()
-    return Response(M3U_CACHE["data"], mimetype='audio/x-mpegurl')
-
+    global _m3u_cache_val, _m3u_cache_ts
+    now = time.time()
+    if now - _m3u_cache_ts >= _M3U_TTL:
+        events = _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache)
+        slugs, ev_map = [], {}
+        for ev in events:
+            s = ev.get('enc_parent') or ev.get('parent') or ev.get('id')
+            if s:
+                slugs.append(s)
+                ev_map[s] = ev
+        urls = _resolve_many(slugs)
+        lines = ["#EXTM3U"]
+        for slug, url in urls.items():
+            if not url:
+                continue
+            ev = ev_map[slug]
+            t = f"{ev.get('team_a_name', '?')} vs {ev.get('team_b_name', '?')}"
+            g = ev.get('sport', 'Sports')
+            l = ev.get('league', '')
+            if l:
+                g += ' - ' + l
+            lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{t}" group-title="{g}",{t}')
+            lines.append(url)
+        _m3u_cache_val = '\n'.join(lines)
+        _m3u_cache_ts = time.time()
+    return Response(_m3u_cache_val, mimetype='audio/x-mpegurl')
 
 @app.route('/playlist/<slug>.m3u')
 def event_playlist_m3u(slug):
+    streams = _pb_cached(slug)
     lines = ["#EXTM3U"]
-    servers = fetch_playback(slug)
-    if not servers:
-        return Response("#EXTM3U\n", mimetype='audio/x-mpegurl')
-    srv = servers[0]
-    result = decrypt_payload(srv['enc'], str(srv['bucket']))
-    if not result or 'streams' not in result:
-        return Response("#EXTM3U\n", mimetype='audio/x-mpegurl')
-    for i, s in enumerate(result['streams']):
-        label = f'LIVE {i+1}'
-        url = s.get('stream_url', '')
-        if url:
-            lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{label}",{label}')
-            lines.append(url)
-    return Response("\n".join(lines), mimetype='audio/x-mpegurl')
-
+    for i, s in enumerate(streams):
+        u = s.get('stream_url', '')
+        if u:
+            lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="LIVE {i+1}",LIVE {i+1}')
+            lines.append(u)
+    return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
 @app.route('/api/<path:subpath>')
 def proxy_api(subpath):
@@ -263,199 +266,104 @@ def proxy_api(subpath):
     url = f"{UPSTREAM}/api/{subpath}"
     qs = request.query_string
     if qs:
-        if isinstance(qs, bytes):
-            url += "?" + qs.decode("utf-8")
-        else:
-            url += "?" + qs
-    try:
-        st, body = http_get(url)
-        if st == 0:
-            return jsonify({"error": "Could not connect to upstream server"}), 502
-        return Response(body, status=st, content_type='application/json')
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        url += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
+    st, body = _http_get(url)
+    return Response(body, status=st or 502, content_type='application/json')
 
-
-def _hls_rewrite(body, base_dir, slug, idx):
-    def rw(line_url):
-        p = urlparse(line_url)
-        if p.netloc:
-            return line_url
-        return urljoin(base_dir, line_url)
-
+def _hls_rewrite(body, base_dir):
     lines = body.split('\n')
     out = []
     for line in lines:
-        stripped = line.strip()
-        if not stripped:
+        s = line.strip()
+        if not s:
             out.append(line)
-        elif stripped.startswith('#'):
-            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', lambda m: 'URI="' + rw(m.group(1) or m.group(2)) + '"', line))
+        elif s[0] == '#':
+            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', lambda m: 'URI="' + (urljoin(base_dir, m.group(1) or m.group(2))) + '"', line))
         else:
-            out.append(rw(stripped))
+            out.append(urljoin(base_dir, s))
     return '\n'.join(out)
-
 
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
     target = request.args.get('url', '')
-    servers = fetch_playback(slug)
-    if not servers:
-        return jsonify({"error": "No servers found"}), 404
-    srv = servers[0]
-    result = decrypt_payload(srv['enc'], str(srv['bucket']))
-    if not result or 'streams' not in result or not (0 <= idx < len(result['streams'])):
-        return jsonify({"error": "Invalid stream"}), 404
-    s = result['streams'][idx]
-
+    streams = _pb_cached(slug)
+    if not streams or idx >= len(streams):
+        return jsonify({"error": "Not found"}), 404
+    s = streams[idx]
     if not target:
         target = s['stream_url']
-
     p = urlparse(target)
     if not p.netloc:
-        base_url = s['stream_url']
-        base_dir = base_url[:base_url.rfind('/') + 1]
-        target = urljoin(base_dir, target)
-
-    http = get_media_http()
-    resp = None
-    logging.info(f"proxy_hls slug={slug} idx={idx} target={target[:120]}")
+        target = urljoin(s['stream_url'][:s['stream_url'].rfind('/') + 1], target)
+    http = _media_sess()
     for attempt in range(2):
         try:
             resp = http.get(target)
-            logging.info(f"proxy_hls attempt {attempt+1} status={resp.status_code} len={len(resp.content)}")
             if resp.status_code == 200:
-                break
-            logging.warning(f"proxy_hls attempt {attempt+1} got {resp.status_code} for {target[:80]}")
+                text = resp.text
+                if '.m3u8' in target or text.startswith('#EXT'):
+                    return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
+                return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+        except Exception:
             if attempt == 0:
                 time.sleep(1)
-        except Exception as e:
-            logging.warning(f"proxy_hls attempt {attempt+1} failed: {e}")
-            if attempt == 0:
-                time.sleep(1)
-            continue
-    else:
-        code = resp.status_code if resp is not None else 'connection failed'
-        return jsonify({"error": f"Upstream returned {code}"}), 502
-
-    text = resp.text
-    is_playlist = '.m3u8' in target or text.startswith('#EXTM3U') or text.startswith('#EXT-X-')
-
-    if is_playlist:
-        base_dir = target[:target.rfind('/') + 1]
-        body = _hls_rewrite(text, base_dir, slug, idx)
-        return Response(body, content_type='application/vnd.apple.mpegurl')
-    else:
-        return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-
+    return jsonify({"error": "Upstream failed"}), 502
 
 @app.route('/proxy/dashseg/<slug>/<int:idx>/<path:seg_path>')
 def proxy_dash_seg(slug, idx, seg_path):
-    servers = fetch_playback(slug)
-    if not servers:
-        return jsonify({"error": "No servers found"}), 404
-    srv = servers[0]
-    result = decrypt_payload(srv['enc'], str(srv['bucket']))
-    if not result or 'streams' not in result or not (0 <= idx < len(result['streams'])):
-        return jsonify({"error": "Invalid stream"}), 404
-
-    stream_url = result['streams'][idx]['stream_url']
-    base_dir = stream_url[:stream_url.rfind('/') + 1]
+    streams = _pb_cached(slug)
+    if not streams or idx >= len(streams):
+        return jsonify({"error": "Not found"}), 404
+    base_dir = streams[idx]['stream_url']
+    base_dir = base_dir[:base_dir.rfind('/') + 1]
     target = urljoin(base_dir, seg_path)
     qs = request.query_string
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
-
-    logging.info(f"proxy_dash_seg slug={slug} idx={idx} seg_path={seg_path} target={target}")
-
-    http = get_media_http()
-    for attempt in range(2):
+    http = _media_sess()
+    for _ in range(2):
         try:
             resp = http.get(target)
-            if resp.status_code == 200 or resp.status_code in (206, 302, 301):
-                if resp.status_code == 200 or resp.status_code == 206:
+            if resp.status_code in (200, 206):
+                return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+            if resp.status_code in (301, 302) and resp.headers.get('location'):
+                resp = http.get(resp.headers['location'])
+                if resp.status_code in (200, 206):
                     return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-                if resp.status_code in (301, 302):
-                    redirect = resp.headers.get('location', '')
-                    if redirect:
-                        resp = http.get(redirect)
-                        if resp.status_code == 200 or resp.status_code == 206:
-                            return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-            logging.warning(f"proxy_dash_seg attempt {attempt+1} got {resp.status_code} for {target[:120]} body_preview={resp.text[:200]}")
-            if attempt == 0:
-                time.sleep(0.5)
-        except Exception as e:
-            logging.warning(f"proxy_dash_seg attempt {attempt+1} failed: {e}")
-            if attempt == 0:
-                time.sleep(0.5)
-
-    return jsonify({"error": "Segment fetch failed"}), 502
-
+        except Exception:
+            time.sleep(0.5)
+    return jsonify({"error": "Segment failed"}), 502
 
 @app.route('/proxy/manifest/<slug>/<int:idx>')
 def proxy_manifest(slug, idx):
-    servers = fetch_playback(slug)
-    if not servers:
-        return jsonify({"error": "No servers found"}), 404
-    srv = servers[0]
-    result = decrypt_payload(srv['enc'], str(srv['bucket']))
-    if not result or 'streams' not in result or not (0 <= idx < len(result['streams'])):
-        return jsonify({"error": "Invalid stream"}), 404
-    s = result['streams'][idx]
-    url = s['stream_url']
-    drm_kid = s.get('drm_kid', '')
-    drm_key = s.get('drm_key', '')
-
-    http = get_media_http()
-    resp = None
+    streams = _pb_cached(slug)
+    if not streams or idx >= len(streams):
+        return jsonify({"error": "Not found"}), 404
+    s = streams[idx]
+    url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
+    http = _media_sess()
     for attempt in range(3):
         try:
-            resp = http.get(url, headers={
-                'Origin': UPSTREAM,
-                'Accept': '*/*',
-                'X-Requested-With': 'lsp',
-                'X-LSP-Enc': '1',
-            })
+            resp = http.get(url, headers={'Origin': UPSTREAM, 'Accept': '*/*', 'X-Requested-With': 'lsp', 'X-LSP-Enc': '1'})
             if resp.status_code == 200:
-                break
-            logging.warning(f"proxy_manifest attempt {attempt+1} got {resp.status_code}")
-            # On 400/403, retry with fresh playback data (URL may have expired)
-            if resp.status_code in (400, 403) and attempt == 0:
-                pass  # fall through to re-fetch below
-        except Exception as e:
-            logging.warning(f"proxy_manifest attempt {attempt+1} failed: {e}")
+                body = resp.text
+                if '.mpd' in url and drm_kid and drm_key:
+                    ck = '\n<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
+                    body = re.sub(r'(<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*/>)', r'\1' + ck, body)
+                return Response(body, content_type='application/dash+xml')
+        except Exception:
+            pass
         if attempt < 2:
             time.sleep(1)
-            servers = fetch_playback(slug)
-            if servers:
-                result = decrypt_payload(servers[0]['enc'], str(servers[0]['bucket']))
-                if result and 'streams' in result and 0 <= idx < len(result['streams']):
-                    url = result['streams'][idx]['stream_url']
-    else:
-        return jsonify({"error": "Stream unavailable"}), 502
-    body = resp.text
+            _pb_cache.pop(slug, None)
+            streams = _pb_cached(slug)
+            if streams and idx < len(streams):
+                url = streams[idx]['stream_url']
+    return jsonify({"error": "Manifest failed"}), 502
 
-    if '.mpd' in url:
-        # Leave original segment URLs intact — CDN allows CORS (Access-Control-Allow-Origin: *)
-        # so the browser can fetch segments directly. Only inject ClearKey DRM.
-
-        # Inject ClearKey ContentProtection if we have the key
-        if drm_kid and drm_key:
-            ck_uuid = 'urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e'
-            ck_tag = '\n<ContentProtection schemeIdUri="' + ck_uuid + '" value="ClearKey"/>'
-            # Inject into every Representation that already has CENC protection
-            body = re.sub(
-                r'(<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*/>)',
-                r'\1' + ck_tag,
-                body
-            )
-
-    return Response(body, content_type='application/dash+xml')
-
-
-GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
-GITHUB_RAW = 'https://raw.githubusercontent.com/rafu-milonmart/my-proxy-project/refs/heads/master'
-
+# ---------------------------------------------------------------------------
+# Version / Update
+# ---------------------------------------------------------------------------
 @app.route('/api/version')
 def api_version():
     return jsonify({'ok': True, 'version': CURRENT_VERSION})
@@ -463,12 +371,11 @@ def api_version():
 @app.route('/api/update/check')
 def update_check():
     try:
-        import urllib.request, json as pyjson
-        req = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            latest = pyjson.loads(r.read())['sha']
-        has_update = latest != CURRENT_VERSION
-        return jsonify({'ok': True, 'current': CURRENT_VERSION[:12], 'latest': latest[:12], 'has_updates': has_update})
+        import urllib.request
+        r = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(r, timeout=10) as f:
+            latest = json.loads(f.read())['sha']
+        return jsonify({'ok': True, 'current': CURRENT_VERSION[:12], 'latest': latest[:12], 'has_updates': latest != CURRENT_VERSION})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
 
@@ -477,32 +384,23 @@ def update_apply():
     try:
         import urllib.request, zipfile, io, tempfile, shutil
         base = Path(__file__).parent
-        req = urllib.request.Request(f'{GITHUB_API}/zipball/master', headers={'User-Agent': 'ZeroLive'})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            z = zipfile.ZipFile(io.BytesIO(r.read()))
-            extract_dir = Path(tempfile.mkdtemp())
-            z.extractall(extract_dir)
-            subdirs = [d for d in extract_dir.iterdir() if d.is_dir()]
-            src = subdirs[0] if subdirs else extract_dir
+        r = urllib.request.Request(f'{GITHUB_API}/zipball/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(r, timeout=60) as f:
+            z = zipfile.ZipFile(io.BytesIO(f.read()))
+            d = Path(tempfile.mkdtemp())
+            z.extractall(d)
+            src = next(p for p in d.iterdir() if p.is_dir())
             for item in src.iterdir():
                 if item.name in ('python', 'Zero_live.bat', 'version.txt'): continue
                 dst = base / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(item, dst)
-            shutil.rmtree(extract_dir, ignore_errors=True)
-        import subprocess as sp
+                (shutil.copytree if item.is_dir() else shutil.copy2)(item, dst)
+            shutil.rmtree(d, ignore_errors=True)
         pip = str(base / 'python' / 'Scripts' / 'pip.exe')
-        if os.path.exists(pip):
-            sp.run([pip, 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
-        else:
-            sp.run([sys.executable, '-m', 'pip', 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
-        req2 = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
-        with urllib.request.urlopen(req2, timeout=10) as r:
-            new_sha = json.loads(r.read())['sha']
+        subprocess.run([pip if os.path.exists(pip) else sys.executable, 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
+        r2 = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
+        with urllib.request.urlopen(r2, timeout=10) as f:
+            new_sha = json.loads(f.read())['sha']
         (base / 'version.txt').write_text(new_sha)
-        # Reload current version
         global CURRENT_VERSION
         CURRENT_VERSION = new_sha
         return jsonify({'ok': True, 'message': 'Update applied. Restarting...'})
@@ -514,24 +412,54 @@ def update_restart():
     threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
     return jsonify({'ok': True, 'message': 'Restarting...'})
 
+# ---------------------------------------------------------------------------
+# Background pre-warm — fetch ALL events + ALL playback on loop
+# ---------------------------------------------------------------------------
+def _warm_all():
+    while True:
+        try:
+            events = _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache)
+            if events:
+                slugs = []
+                for ev in events:
+                    s = ev.get('enc_parent') or ev.get('parent') or ev.get('id')
+                    if s:
+                        slugs.append(s)
+                _resolve_many(slugs)
+        except Exception:
+            pass
+        time.sleep(15)
 
+threading.Thread(target=_warm_all, daemon=True).start()
+
+# ---------------------------------------------------------------------------
+# Error + static
+# ---------------------------------------------------------------------------
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
 
-
 @app.route('/<path:filename>')
 def serve_static(filename):
     resolved = (STATIC_DIR / filename).resolve()
-    if not str(resolved).startswith(str(STATIC_DIR.resolve())):
+    if not str(resolved).startswith(str(STATIC_DIR.resolve())) or not resolved.is_file():
         return jsonify({"error": "Not found"}), 404
-    if resolved.is_file():
-        return send_from_directory(STATIC_DIR, filename)
-    return jsonify({"error": "Not found"}), 404
+    return send_from_directory(STATIC_DIR, filename)
 
-
+# ---------------------------------------------------------------------------
+# Entry
+# ---------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', sys.argv[1] if len(sys.argv) > 1 else 9090))
-    print(f"Server: http://0.0.0.0:{port}")
-    print(f"M3U:   http://0.0.0.0:{port}/playlist.m3u")
-    app.run(host='0.0.0.0', port=port, threaded=True)
+    try:
+        import webbrowser
+        webbrowser.open(f'http://localhost:{port}')
+    except Exception:
+        pass
+    try:
+        import gunicorn.app.wsgiapp
+        sys.argv = ['gunicorn', 'app:app', '--bind', f'0.0.0.0:{port}', '--workers', '4', '--threads', '8', '--worker-class', 'gthread', '--access-logfile', '-']
+        gunicorn.app.wsgiapp.run()
+    except ImportError:
+        print(f"ZeroLive @ http://0.0.0.0:{port}")
+        app.run(host='0.0.0.0', port=port, threaded=True)

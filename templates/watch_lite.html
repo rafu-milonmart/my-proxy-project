@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>{{ event.team_a_name if event else slug }} vs {{ event.team_b_name if event else 'Stream' }} - ZeroLive Lite</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='url(%23g)'/><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%23ff2d55'/><stop offset='100%25' stop-color='%237936f7'/></linearGradient></defs><text x='16' y='22' text-anchor='middle' fill='white' font-size='17' font-weight='bold'>Z</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20"></script>
+<script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
+<style>
+body{font-family:sans-serif;background:#000;color:#fff;margin:0;padding:0}
+#player{width:100%;max-width:960px;margin:0 auto;background:#000}
+video{width:100%;display:block;max-height:90vh}
+.controls{padding:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.srv{padding:6px 14px;border:1px solid #555;background:#222;color:#fff;border-radius:4px;cursor:pointer;font-size:13px}
+.srv.active{border-color:#0B9444;background:#0B9444;color:#fff}
+.info{padding:4px 8px;font-size:13px;color:#999}
+.info a{color:#0B9444}
+.status{padding:4px 8px;font-size:12px;color:#999;min-height:1.2em}
+</style>
+</head>
+<body>
+<div id="player">
+  <div class="info">
+    <span>{{ event.team_a_name if event else slug }} vs {{ event.team_b_name if event else 'Stream' }}</span>
+    {% if event and event.league %} &middot; {{ event.league }}{% endif %}
+    &middot; <a href="/faster">Back</a>
+  </div>
+  <video id="video" autoplay playsinline preload="auto" controls></video>
+  <div class="controls" id="controls"></div>
+  <div class="status" id="status">Select a server to play</div>
+</div>
+<script>
+var streams = {{ streams | tojson }};
+var slug = '{{ slug }}';
+var video = document.getElementById('video');
+var controls = document.getElementById('controls');
+var status = document.getElementById('status');
+var player = null;
+
+function destroy(){
+  if(player && player.destroy) try{player.destroy()}catch(e){}
+  if(player && player.detachMedia) try{player.detachMedia()}catch(e){}
+  player = null;
+  video.removeAttribute('src');
+  video.load();
+}
+
+function loadStream(idx){
+  destroy();
+  status.textContent = 'Loading...';
+  var btns = controls.querySelectorAll('.srv');
+  btns.forEach(function(b){b.classList.remove('active')});
+  if(btns[idx]) btns[idx].classList.add('active');
+  var s = streams[idx];
+  if(!s){status.textContent='Not available';return;}
+  var url = s.stream_url;
+  var type = s.stream_type||'';
+  var isDash = type==='dash'||url.includes('.mpd');
+  var isHls = type==='hls'||url.includes('.m3u8');
+
+  if(isDash){
+    if(typeof dashjs==='undefined'){status.textContent='dashjs not loaded';return;}
+    var dp = dashjs.MediaPlayer().create();
+    if(s.drm_kid && s.drm_key){
+      var ck={};ck[s.drm_kid.toLowerCase()]=s.drm_key.toLowerCase();
+      dp.setProtectionData({'org.w3.clearkey':{'clearkeys':ck}});
+    }
+    dp.initialize(video,url,true);
+    player = dp;
+    status.textContent='';
+  }else if(isHls){
+    if(typeof Hls==='undefined'){status.textContent='hls.js not loaded';return;}
+    if(Hls.isSupported()){
+      var proxyUrl = '/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
+      var h = new Hls({enableWorker:true});
+      h.attachMedia(video);
+      h.loadSource(proxyUrl);
+      player = h;
+      status.textContent='';
+    }else if(video.canPlayType('application/vnd.apple.mpegurl')){
+      video.src = url;
+      status.textContent='';
+    }else{
+      status.textContent='HLS not supported';
+    }
+  }else{
+    video.src = url;
+    status.textContent='';
+  }
+}
+
+controls.addEventListener('click', function(e){
+  var btn = e.target.closest('.srv');
+  if(!btn) return;
+  var idx = parseInt(btn.dataset.idx);
+  if(!isNaN(idx)) loadStream(idx);
+});
+
+function renderButtons(){
+  controls.innerHTML = streams.map(function(s,i){
+    return '<button class="srv" data-idx="'+i+'">LIVE '+(i+1)+'</button>';
+  }).join('');
+  if(streams.length) loadStream(0);
+}
+
+renderButtons();
+</script>
+</body>
+</html>
