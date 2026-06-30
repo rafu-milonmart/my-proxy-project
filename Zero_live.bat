@@ -41,14 +41,12 @@ if defined LATEST_SHA (
 )
 echo.
 
-REM Start app
+REM Start app (loop so in-app restart works)
+:RESTART
 echo Starting ZeroLive...
-start "" http://127.0.0.1:9090
+start /b "" http://127.0.0.1:9090
 set PORT=9090
 "%PYTHON%" app.py
-
-if !errorlevel! neq 0 (
-    echo.
-    echo App exited with error code !errorlevel!.
-    pause
-)
+echo App exited (code !errorlevel!). Restarting in 3s...
+timeout /t 3 /nobreak >nul
+goto RESTART

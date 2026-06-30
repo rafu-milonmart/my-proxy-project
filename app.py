@@ -20,6 +20,7 @@ VERSION_FILE = STATIC_DIR / 'version.txt'
 CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
 GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
 DEBUG = os.environ.get('ZL_DEBUG', '0') == '1'
+_LAUNCH_ARGS = None  # saved by __main__ for restart
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = DEBUG
@@ -393,7 +394,8 @@ def update_apply():
             for item in src.iterdir():
                 if item.name in ('python', 'Zero_live.bat', 'version.txt'): continue
                 dst = base / item.name
-                (shutil.copytree if item.is_dir() else shutil.copy2)(item, dst)
+                if item.is_dir(): shutil.copytree(item, dst, dirs_exist_ok=True)
+                else: shutil.copy2(item, dst)
             shutil.rmtree(d, ignore_errors=True)
         pip = str(base / 'python' / 'Scripts' / 'pip.exe')
         subprocess.run([pip if os.path.exists(pip) else sys.executable, 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
@@ -409,7 +411,12 @@ def update_apply():
 
 @app.route('/api/update/restart')
 def update_restart():
-    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
+    def _do_restart():
+        time.sleep(1)
+        if _LAUNCH_ARGS:
+            subprocess.Popen(_LAUNCH_ARGS, shell=True)
+        os._exit(0)
+    threading.Thread(target=_do_restart).start()
     return jsonify({'ok': True, 'message': 'Restarting...'})
 
 # ---------------------------------------------------------------------------
@@ -451,6 +458,7 @@ def serve_static(filename):
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', sys.argv[1] if len(sys.argv) > 1 else 9090))
+    _LAUNCH_ARGS = [sys.executable] + sys.argv[:1] + [str(port)]
     try:
         import webbrowser
         webbrowser.open(f'http://localhost:{port}')
