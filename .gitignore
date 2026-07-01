@@ -10,4 +10,5 @@ __pycache__/
 random_web/
 version.txt
 combined-playlist.m3u
-i found a m3u.txt
+templates/admin.html
+logs/

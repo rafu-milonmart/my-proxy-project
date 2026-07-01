@@ -14,6 +14,8 @@ video{width:100%;display:block;max-height:90vh}
 .controls{padding:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .srv{padding:6px 14px;border:1px solid #555;background:#222;color:#fff;border-radius:4px;cursor:pointer;font-size:13px}
 .srv.active{border-color:#0B9444;background:#0B9444;color:#fff}
+.iptv-srv{border-color:#a855f7;color:#a855f7}
+.iptv-srv.active{border-color:#a855f7;background:#a855f7;color:#fff}
 .info{padding:4px 8px;font-size:13px;color:#999}
 .info a{color:#0B9444}
 .status{padding:4px 8px;font-size:12px;color:#999;min-height:1.2em}
@@ -72,7 +74,7 @@ function loadStream(idx){
   }else if(isHls){
     if(typeof Hls==='undefined'){status.textContent='hls.js not loaded';return;}
     if(Hls.isSupported()){
-      var proxyUrl = '/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
+      var proxyUrl = s._iptv ? '/proxy/iptv/'+s._iptv_id+'/' : '/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
       var h = new Hls({enableWorker:true});
       h.attachMedia(video);
       h.loadSource(proxyUrl);
@@ -99,12 +101,21 @@ controls.addEventListener('click', function(e){
 
 function renderButtons(){
   controls.innerHTML = streams.map(function(s,i){
-    return '<button class="srv" data-idx="'+i+'">LIVE '+(i+1)+'</button>';
+    return '<button class="srv'+(s._iptv?' iptv-srv':'')+'" data-idx="'+i+'">'+(s._iptv?s.name:'LIVE '+(i+1))+'</button>';
   }).join('');
   if(streams.length) loadStream(0);
 }
 
 renderButtons();
+
+/* ---- IPTV Mapped Channels ---- */
+fetch('/api/iptv/mappings?sport='+encodeURIComponent('{{ sport|e }}')).then(function(r){return r.json();}).then(function(data){
+  if(!data.ok||!data.channels||data.channels.length===0)return;
+  data.channels.forEach(function(ch,i){
+    streams.push({stream_url:ch.url,stream_type:'hls',_iptv:true,_iptv_id:ch.id,name:ch.name,drm_kid:'',drm_key:''});
+  });
+  renderButtons();
+})['catch'](function(){});
 </script>
 </body>
 </html>

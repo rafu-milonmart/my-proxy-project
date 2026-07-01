@@ -679,6 +679,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   .server-section .row{gap:4px}
   .srv-btn,.q-btn{padding:6px 10px;font-size:12px}
 }
+.iptv-btn{--iptv-accent:#a855f7;border-color:var(--iptv-accent);color:var(--iptv-accent)}
+.iptv-btn:hover{border-color:#c084fc;color:#c084fc}
+.iptv-btn.active{background:var(--iptv-accent);border-color:var(--iptv-accent);color:#fff}
 </style>
 </head>
 <body>
@@ -841,6 +844,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <button class="srv-btn" data-idx="{{ loop.index0 }}">LIVE {{ loop.index }}</button>
       {% endfor %}
     </div>
+    <div class="section-label" id="iptvSectionLabel" style="display:none">IPTV Channels</div>
+    <div class="row" id="iptvServerRow" style="display:none"></div>
   </div>
 
   <div class="server-section" id="qualitySection">
@@ -877,6 +882,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var qualityRow = document.getElementById('qualityRow');
   var streams = {{ streams | tojson }};
   var slug = '{{ slug }}';
+  var eventSport = '{{ sport|e }}';
   var player = null;
   var activeIdx = -1;
   var fallbackTried = {};
@@ -1190,8 +1196,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     L('loadStream('+idx+') called');
     lastProgress=Date.now();
     destroyPlayer();
-    serverRow.querySelectorAll('.srv-btn').forEach(function(b){b.classList.remove('active');});
-    var targetBtn=serverRow.querySelector('.srv-btn[data-idx="'+idx+'"]');
+    document.querySelectorAll('.srv-btn').forEach(function(b){b.classList.remove('active');});
+    var targetBtn=document.querySelector('.srv-btn[data-idx="'+idx+'"]');
     if(targetBtn)targetBtn.classList.add('active');
     activeIdx=idx;
     var stream=streams[idx];
@@ -1234,7 +1240,11 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
           showVideo();
-          url='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
+          if(stream._iptv){
+            url='/proxy/iptv/'+stream._iptv_id+'/';
+          }else{
+            url='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
+          }
           var hls=new Hls({
             enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
             backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1
@@ -1269,6 +1279,36 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   }
 
   serverRow.addEventListener('click',function(e){
+    var btn=e.target.closest('.srv-btn');
+    if(!btn)return;
+    var idx=parseInt(btn.dataset.idx);
+    if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
+  });
+
+  /* ---- IPTV Mapped Channels ---- */
+  var iptvServerRow=document.getElementById('iptvServerRow');
+  var iptvSectionLabel=document.getElementById('iptvSectionLabel');
+  (function(){
+    fetch('/api/iptv/mappings?sport='+encodeURIComponent(eventSport)).then(function(r){return r.json();}).then(function(data){
+      if(!data.ok||!data.channels||data.channels.length===0)return;
+      var chs=data.channels;
+      chs.forEach(function(ch,i){
+        var idx=(streams||[]).length+i;
+        var btn=document.createElement('button');
+        btn.className='srv-btn iptv-btn';
+        btn.dataset.idx=idx;
+        btn.textContent=ch.name;
+        iptvServerRow.appendChild(btn);
+        // append to streams array as fake stream object
+        streams.push({stream_url:ch.url,stream_type:'hls',drm_kid:'',drm_key:'',_iptv:true,_iptv_id:ch.id});
+      });
+      iptvServerRow.style.display='';
+      iptvSectionLabel.style.display='';
+    })['catch'](function(){});
+  })();
+
+  /* ---- IPTV server row click ---- */
+  iptvServerRow.addEventListener('click',function(e){
     var btn=e.target.closest('.srv-btn');
     if(!btn)return;
     var idx=parseInt(btn.dataset.idx);

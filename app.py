@@ -1,6 +1,6 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin as _urljoin
 from pathlib import Path
 from flask import Flask, send_from_directory, Response, request, jsonify, render_template
 from curl_cffi import requests as curl_requests
@@ -25,8 +25,16 @@ _LAUNCH_ARGS = None  # saved by __main__ for restart
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = DEBUG
 
-if not DEBUG:
-    logging.disable(logging.CRITICAL)
+LOG_DIR = STATIC_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+_log = logging.getLogger('zl')
+_log.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+_fh = logging.FileHandler(LOG_DIR / 'app.log', encoding='utf-8')
+_fh.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', datefmt='%H:%M:%S'))
+_log.addHandler(_fh)
+_sh = logging.StreamHandler()
+_sh.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', datefmt='%H:%M:%S'))
+_log.addHandler(_sh)
 
 _POOL = ThreadPoolExecutor(max_workers=16)
 _tlocal = threading.local()
@@ -188,6 +196,12 @@ def faster():
 # IPTV (ZeroLive 2) — sports only
 # ---------------------------------------------------------------------------
 IPTV_PLAYLIST = Path(__file__).parent / 'combined-playlist.m3u'
+M3U_SOURCE_FILE = Path(__file__).parent / 'MAINM3U.txt'
+
+def _get_m3u_url():
+    if M3U_SOURCE_FILE.exists():
+        return M3U_SOURCE_FILE.read_text(encoding='utf-8').strip()
+    return 'https://raw.githubusercontent.com/abusaeeidx/IPTV-Scraper-Zilla/refs/heads/main/combined-playlist.m3u'
 _IPTV_CHANNELS = []
 _SPORTS_GROUP_NAMES = {'Pixelsports','CricHD'}
 _SPORTS_KEYWORDS = ['nfl','nba','mlb','nhl','ncaa','espn','fox sports','nfl network','nba tv',
@@ -214,6 +228,10 @@ def _is_sports(entry):
 def _load_iptv():
     global _IPTV_CHANNELS
     _IPTV_CHANNELS = []
+    url = _get_m3u_url()
+    st, body = _http_get(url)
+    if st == 200 and body:
+        IPTV_PLAYLIST.write_text(body, encoding='utf-8')
     if not IPTV_PLAYLIST.exists():
         return
     text = IPTV_PLAYLIST.read_text(encoding='utf-8')
@@ -250,15 +268,217 @@ def _load_iptv():
         i += 1
 
 _load_iptv()
+_log.info('Loaded %d IPTV channels', len(_IPTV_CHANNELS))
+
+# ---------------------------------------------------------------------------
+# Admin Mappings (category -> IPTV channel IDs) — always read from disk
+# so multi-worker gunicorn sees latest state.
+# ---------------------------------------------------------------------------
+MAPPINGS_FILE = STATIC_DIR / 'admin_mappings.json'
+
+def _read_mappings():
+    if MAPPINGS_FILE.exists():
+        try:
+            d = json.loads(MAPPINGS_FILE.read_text())
+            return d.get('category_mappings', {}), set(d.get('excluded_ids', []))
+        except Exception:
+            pass
+    return {}, set()
+
+def _save_mappings(cat_map, excluded):
+    MAPPINGS_FILE.write_text(json.dumps({
+        'category_mappings': cat_map,
+        'excluded_ids': list(excluded)
+    }, indent=2))
+
+def _get_mapped_ids():
+    cat_map, _ = _read_mappings()
+    ids = set()
+    for v in cat_map.values():
+        ids.update(v)
+    return ids
+
+def _get_unmapped_channels():
+    _, excluded = _read_mappings()
+    return [c for c in _IPTV_CHANNELS if c['id'] not in excluded]
+
+def _get_iptv_channels_for_slug(slug, sport=''):
+    cat_map, excluded = _read_mappings()
+    cat = sport or ''
+    seen = set()
+    out = []
+    for c in _IPTV_CHANNELS:
+        if c['id'] in cat_map.get(cat, []):
+            if c['id'] not in seen and c['id'] not in excluded:
+                seen.add(c['id'])
+                out.append(c)
+    return out
+
+def _dedup_events(events):
+    seen = {}
+    for e in events:
+        key = (e.get('team1',''), e.get('team2',''), e.get('title',''), e.get('sport',''))
+        if key not in seen:
+            seen[key] = e
+    return list(seen.values())
+
+ADMIN_PASS = os.environ.get('ZL_ADMIN_PASS', 'admin123')
+
+@app.route('/admin')
+def admin_panel():
+    ev_fut = _POOL.submit(lambda: _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache))
+    events = _dedup_events(ev_fut.result())
+    cats = sorted(set(e.get('sport','') or 'Other' for e in events))
+    by_cat = {}
+    for e in events:
+        cat = e.get('sport','') or 'Other'
+        by_cat.setdefault(cat, []).append(e)
+    groups = sorted(set(c['group'] for c in _IPTV_CHANNELS if c['group']))
+    cat_mappings, excluded_ids = _read_mappings()
+    return render_template('admin.html',
+        events=events,
+        categories=cats,
+        events_by_cat=by_cat,
+        channels=_IPTV_CHANNELS,
+        groups=groups,
+        total_channels=len(_IPTV_CHANNELS),
+        cat_mappings=cat_mappings,
+        excluded_ids=list(excluded_ids))
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    data = request.get_json(force=True, silent=True)
+    pwd = (data or {}).get('password', '')
+    if pwd == ADMIN_PASS:
+        return jsonify({'ok': True})
+    return jsonify({'ok': False}), 401
+
+@app.route('/api/admin/events')
+def admin_events():
+    ev_fut = _POOL.submit(lambda: _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache))
+    events = _dedup_events(ev_fut.result())
+    return jsonify({'ok': True, 'events': events})
+
+@app.route('/api/admin/mappings', methods=['GET', 'POST'])
+def admin_mappings():
+    if request.method == 'POST':
+        data = request.get_json(force=True, silent=True) or {}
+        cat = data.get('category', '')
+        cids = data.get('channel_ids', [])
+        if not cat:
+            return jsonify({'ok': False, 'error': 'Category required'}), 400
+        cat_map, excluded = _read_mappings()
+        cat_map[cat] = cids
+        _save_mappings(cat_map, excluded)
+        _log.info('Mappings saved for category=%s (%d channels)', cat, len(cids))
+        return jsonify({'ok': True})
+    cat_map, _ = _read_mappings()
+    return jsonify({
+        'ok': True,
+        'category_mappings': cat_map
+    })
+
+@app.route('/api/admin/exclude', methods=['POST'])
+def admin_exclude():
+    data = request.get_json(force=True, silent=True) or {}
+    cid = data.get('channel_id')
+    exclude = data.get('exclude', True)
+    if cid is None:
+        return jsonify({'ok': False, 'error': 'channel_id required'}), 400
+    cat_map, excluded = _read_mappings()
+    if exclude:
+        excluded.add(cid)
+    else:
+        excluded.discard(cid)
+    _save_mappings(cat_map, excluded)
+    return jsonify({'ok': True, 'excluded_ids': list(excluded)})
+
+@app.route('/api/admin/validate', methods=['POST'])
+def admin_validate():
+    data = request.get_json(force=True, silent=True) or {}
+    ids = data.get('channel_ids')
+    to_check = [c for c in _IPTV_CHANNELS if ids is None or c['id'] in ids]
+    _log.info('Validating %d IPTV channels...', len(to_check))
+    cat_map, excluded = _read_mappings()
+    results = {}
+    done = 0
+    def _check(ch):
+        target = ch['url']
+        ua = ch.get('user_agent', '')
+        ref = ch.get('referer', '')
+        headers = {}
+        if ua: headers['User-Agent'] = ua
+        if ref: headers['Referer'] = ref
+        http = _media_sess()
+        base_url = target[:target.rfind('/') + 1]
+        try:
+            resp = http.get(target, headers=headers or None, timeout=10)
+            if resp.status_code != 200:
+                return ch['id'], False, ch.get('name', '?')
+            text = resp.text
+            seg_url = None
+            for line in text.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    seg_url = _urljoin(base_url, line) if not line.startswith('http') else line
+                    break
+            if seg_url:
+                seg_resp = http.get(seg_url, headers=headers or None, timeout=10)
+                ok = seg_resp.status_code == 200
+            else:
+                ok = True
+        except Exception:
+            ok = False
+        return ch['id'], ok, ch.get('name', '?')
+    with ThreadPoolExecutor(max_workers=30) as pool:
+        futures = [pool.submit(_check, c) for c in to_check]
+        for f in as_completed(futures):
+            try:
+                cid, ok, name = f.result()
+                results[str(cid)] = 'ok' if ok else 'failed'
+                if not ok:
+                    excluded.add(cid)
+                    _log.info('  BLOCKED %s (id=%d)', name, cid)
+                done += 1
+                if done % 50 == 0:
+                    _log.info('  Progress: %d/%d', done, len(to_check))
+            except Exception:
+                pass
+    _save_mappings(cat_map, excluded)
+    ok_count = sum(1 for v in results.values() if v == 'ok')
+    _log.info('Validation done: %d ok, %d blocked', ok_count, len(results) - ok_count)
+    return jsonify({'ok': True, 'results': results, 'excluded_ids': list(excluded)})
+
+@app.route('/api/iptv/mappings')
+def iptv_mappings():
+    sport = request.args.get('sport', '')
+    channels = _get_iptv_channels_for_slug('', sport)
+    return jsonify({'ok': True, 'channels': channels, 'count': len(channels)})
 
 @app.route('/iptv')
 def iptv_index():
-    groups = sorted(set(c['group'] for c in _IPTV_CHANNELS if c['group']))
-    return render_template('iptv.html', channels=_IPTV_CHANNELS, groups=groups, total=len(_IPTV_CHANNELS))
+    chs = _get_unmapped_channels()
+    groups = sorted(set(c['group'] for c in chs if c['group']))
+    return render_template('iptv.html', channels=chs, groups=groups, total=len(chs))
+
+@app.route('/api/debug/exclusive')
+def debug_exclusive():
+    cat_map, excluded = _read_mappings()
+    mapped = _get_mapped_ids()
+    unmapped = _get_unmapped_channels()
+    return jsonify({
+        'cat_map': cat_map,
+        'mapped_ids': list(mapped),
+        'excluded_ids': list(excluded),
+        'total_channels': len(_IPTV_CHANNELS),
+        'unmapped_count': len(unmapped),
+        'unmapped_ids': [c['id'] for c in unmapped],
+    })
 
 @app.route('/api/iptv/channels')
 def iptv_channels():
-    return jsonify({'ok': True, 'channels': _IPTV_CHANNELS, 'total': len(_IPTV_CHANNELS)})
+    chs = _get_unmapped_channels()
+    return jsonify({'ok': True, 'channels': chs, 'total': len(chs)})
 
 @app.route('/iptv/watch/<int:channel_id>')
 def iptv_watch(channel_id):
@@ -277,7 +497,8 @@ def watch(slug):
         if e.get('enc_parent') == slug or e.get('parent') == slug or e.get('id') == slug:
             event = e
             break
-    return render_template('watch.html', slug=slug, event=event, streams=streams)
+    sport = (event or {}).get('sport', '')
+    return render_template('watch.html', slug=slug, event=event, streams=streams, sport=sport)
 
 @app.route('/lite/<slug>')
 def watch_lite(slug):
@@ -289,7 +510,8 @@ def watch_lite(slug):
         if e.get('enc_parent') == slug or e.get('parent') == slug or e.get('id') == slug:
             event = e
             break
-    return render_template('watch_lite.html', slug=slug, event=event, streams=streams)
+    sport = (event or {}).get('sport', '')
+    return render_template('watch_lite.html', slug=slug, event=event, streams=streams, sport=sport)
 
 @app.route('/stream/<slug>/<int:idx>')
 def stream_json(slug, idx):
@@ -341,6 +563,15 @@ def event_playlist_m3u(slug):
         if u:
             lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="LIVE {i+1}",LIVE {i+1}')
             lines.append(u)
+    ev = _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache)
+    for e in ev:
+        if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
+            sport = e.get('sport', '')
+            iptv_chs = _get_iptv_channels_for_slug(slug, sport)
+            for ch in iptv_chs:
+                lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
+                lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
+            break
     return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
 @app.route('/api/<path:subpath>')
@@ -366,6 +597,109 @@ def _hls_rewrite(body, base_dir):
         else:
             out.append(urljoin(base_dir, s))
     return '\n'.join(out)
+
+def _iptv_rewrite(body, ch, base_dir=''):
+    lines = body.split('\n')
+    out = []
+    prefix = f'/proxy/iptv/{ch["id"]}/seg/'
+    for line in lines:
+        s = line.strip()
+        if not s:
+            out.append(line)
+        elif s[0] == '#':
+            def repl_uri(m):
+                url = m.group(1) or m.group(2)
+                abs_url = urljoin(base_dir, url) if base_dir else url
+                b64 = base64.urlsafe_b64encode(abs_url.encode()).decode().rstrip('=')
+                return f'URI="{prefix}{b64}"'
+            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', repl_uri, line))
+        else:
+            abs_url = urljoin(base_dir, s) if base_dir else s
+            b64 = base64.urlsafe_b64encode(abs_url.encode()).decode().rstrip('=')
+            out.append(f'{prefix}{b64}')
+    return '\n'.join(out)
+
+@app.route('/proxy/iptv/<int:channel_id>/')
+def proxy_iptv(channel_id):
+    ch = None
+    for c in _IPTV_CHANNELS:
+        if c['id'] == channel_id:
+            ch = c
+            break
+    if not ch:
+        return jsonify({"error": "Not found"}), 404
+    target = ch['url']
+    ua = ch.get('user_agent', '')
+    ref = ch.get('referer', '')
+    headers = {}
+    if ua:
+        headers['User-Agent'] = ua
+    if ref:
+        headers['Referer'] = ref
+    http = _media_sess()
+    for attempt in range(2):
+        try:
+            resp = http.get(target, headers=headers or None)
+            if resp.status_code == 200:
+                ct = resp.headers.get('content-type', '')
+                is_m3u = '.m3u8' in target or 'mpegurl' in ct or 'm3u8' in ct
+                if is_m3u:
+                    text = resp.text
+                    base_dir = target[:target.rfind('/') + 1]
+                    r = Response(_iptv_rewrite(text, ch, base_dir), content_type='application/vnd.apple.mpegurl')
+                    r.headers['Access-Control-Allow-Origin'] = '*'
+                    return r
+                r = Response(resp.content, content_type=ct or 'application/octet-stream')
+                r.headers['Access-Control-Allow-Origin'] = '*'
+                return r
+        except Exception:
+            if attempt == 0:
+                time.sleep(1)
+    return jsonify({"error": "Upstream failed"}), 502
+
+@app.route('/proxy/iptv/<int:channel_id>/seg/<path:b64url>')
+def proxy_iptv_seg(channel_id, b64url):
+    ch = None
+    for c in _IPTV_CHANNELS:
+        if c['id'] == channel_id:
+            ch = c
+            break
+    if not ch:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        padding = 4 - len(b64url) % 4
+        if padding != 4:
+            b64url += '=' * padding
+        target = base64.urlsafe_b64decode(b64url).decode()
+    except Exception:
+        return jsonify({"error": "Bad URL"}), 400
+    ua = ch.get('user_agent', '')
+    ref = ch.get('referer', '')
+    headers = {}
+    if ua:
+        headers['User-Agent'] = ua
+    if ref:
+        headers['Referer'] = ref
+    http = _media_sess()
+    for attempt in range(2):
+        try:
+            resp = http.get(target, headers=headers or None)
+            if resp.status_code in (200, 206):
+                ct = resp.headers.get('content-type', '')
+                is_m3u = '.m3u8' in target or 'mpegurl' in ct or 'm3u8' in ct
+                if is_m3u:
+                    text = resp.text
+                    seg_base = target[:target.rfind('/') + 1] if '/' in target else ''
+                    r = Response(_iptv_rewrite(text, ch, seg_base), content_type='application/vnd.apple.mpegurl')
+                    r.headers['Access-Control-Allow-Origin'] = '*'
+                    return r
+                cors = Response(resp.content, content_type=ct or 'application/octet-stream')
+                cors.headers['Access-Control-Allow-Origin'] = '*'
+                return cors
+        except Exception:
+            if attempt == 0:
+                time.sleep(1)
+    return jsonify({"error": "Upstream failed"}), 502
 
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
