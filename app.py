@@ -184,6 +184,89 @@ def index():
 def faster():
     return render_template('faster.html')
 
+# ---------------------------------------------------------------------------
+# IPTV (ZeroLive 2) — sports only
+# ---------------------------------------------------------------------------
+IPTV_PLAYLIST = Path(__file__).parent / 'combined-playlist.m3u'
+_IPTV_CHANNELS = []
+_SPORTS_GROUP_NAMES = {'Pixelsports','CricHD'}
+_SPORTS_KEYWORDS = ['nfl','nba','mlb','nhl','ncaa','espn','fox sports','nfl network','nba tv',
+    'mlb network','nhl network','sport','cricket','football','tennis','soccer',
+    'boxing','ufc','wwe','aew','f1','motogp','nascar','golf','olympic',
+    'epl','la liga','serie a','bundesliga','ligue 1','champions league','premier league',
+    'acc network','sec network','big ten','pac-12','racing','basketball','baseball',
+    'hockey','sports','bein','sky sport','tnt sport','eurosport',
+    'nfl redzone','nfl sunday','mlb strike','nhl center ice','nba league pass',
+    'world sport','xtra sport','fight','wrestling','mma','motorsport',
+    'indyc,ar','daytona','supercross','superbike']
+
+def _is_sports(entry):
+    name = (entry.get('name') or '').lower()
+    group = (entry.get('group') or '').lower()
+    if group in _SPORTS_GROUP_NAMES:
+        return True
+    text = name + ' ' + group
+    for kw in _SPORTS_KEYWORDS:
+        if kw in text:
+            return True
+    return False
+
+def _load_iptv():
+    global _IPTV_CHANNELS
+    _IPTV_CHANNELS = []
+    if not IPTV_PLAYLIST.exists():
+        return
+    text = IPTV_PLAYLIST.read_text(encoding='utf-8')
+    lines = text.splitlines()
+    i = 0
+    cid = 0
+    while i < len(lines):
+        if lines[i].startswith('#EXTINF:'):
+            entry = {'id': cid, 'name': '', 'logo': '', 'group': '', 'url': '', 'user_agent': '', 'referer': '', 'tvg_id': ''}
+            infoline = lines[i]
+            m = re.search(r'tvg-id="([^"]*)"', infoline)
+            if m: entry['tvg_id'] = m.group(1)
+            m = re.search(r'tvg-logo="([^"]*)"', infoline)
+            if m: entry['logo'] = m.group(1)
+            m = re.search(r'group-title="([^"]*)"', infoline)
+            if m: entry['group'] = m.group(1)
+            comma = infoline.rfind(',')
+            if comma >= 0:
+                entry['name'] = infoline[comma+1:].strip()
+            i += 1
+            while i < len(lines) and lines[i].startswith('#EXTVLCOPT:'):
+                opt = lines[i].replace('#EXTVLCOPT:', '')
+                if opt.startswith('http-user-agent='):
+                    entry['user_agent'] = opt.split('=', 1)[1]
+                elif opt.startswith('http-referrer='):
+                    entry['referer'] = opt.split('=', 1)[1]
+                i += 1
+            if i < len(lines) and not lines[i].startswith('#'):
+                entry['url'] = lines[i].strip()
+            if entry['name'] and entry['url'] and _is_sports(entry):
+                entry['id'] = cid
+                _IPTV_CHANNELS.append(entry)
+                cid += 1
+        i += 1
+
+_load_iptv()
+
+@app.route('/iptv')
+def iptv_index():
+    groups = sorted(set(c['group'] for c in _IPTV_CHANNELS if c['group']))
+    return render_template('iptv.html', channels=_IPTV_CHANNELS, groups=groups, total=len(_IPTV_CHANNELS))
+
+@app.route('/api/iptv/channels')
+def iptv_channels():
+    return jsonify({'ok': True, 'channels': _IPTV_CHANNELS, 'total': len(_IPTV_CHANNELS)})
+
+@app.route('/iptv/watch/<int:channel_id>')
+def iptv_watch(channel_id):
+    for c in _IPTV_CHANNELS:
+        if c['id'] == channel_id:
+            return render_template('iptv_watch.html', channel=c)
+    return jsonify({'error': 'Not found'}), 404
+
 @app.route('/watch/<slug>')
 def watch(slug):
     ev_fut = _POOL.submit(lambda: _cached('events', _EV_TTL, lambda: json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or [], _ev_cache))

@@ -189,6 +189,14 @@ img{max-width:100%;display:block}
   background:linear-gradient(135deg,#fff 30%,var(--accent-1),var(--accent-2));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
 }
+.mode-tabs{display:flex;gap:2px;background:var(--bg-card);border-radius:var(--radius-sm);padding:2px;border:1px solid var(--line)}
+.mode-tab{
+  padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;
+  color:var(--text-tertiary);text-decoration:none;transition:all .2s;
+  letter-spacing:.5px;
+}
+.mode-tab.active{background:var(--accent-2);color:#fff;box-shadow:0 2px 8px var(--accent-glow)}
+.mode-tab:not(.active):hover{color:var(--text)}
 .search-wrap{position:relative;flex:1;max-width:400px}
 .search-wrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--text-tertiary);pointer-events:none}
 .search-input{
@@ -597,6 +605,10 @@ img{max-width:100%;display:block}
       <span class="logo-icon">Z</span>
       <span class="logo-text">ZEROLIVE</span>
     </a>
+    <div class="mode-tabs">
+      <a href="/" class="mode-tab active" data-mode="1">ZL1</a>
+      <a href="/iptv" class="mode-tab" data-mode="2">ZL2</a>
+    </div>
     <div class="search-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input id="search" class="search-input" placeholder="Search teams, leagues..." autocomplete="off">

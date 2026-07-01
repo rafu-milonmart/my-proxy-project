@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>{{ channel.name }} - ZeroLive 2</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='url(%23g)'/><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%23ff2d55'/><stop offset='100%25' stop-color='%237936f7'/></linearGradient></defs><text x='16' y='22' text-anchor='middle' fill='white' font-size='17' font-weight='bold'>Z</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20"></script>
+<style>
+body{font-family:sans-serif;background:#000;color:#fff;margin:0;padding:0}
+#player{width:100%;max-width:960px;margin:0 auto;background:#000}
+video{width:100%;display:block;max-height:90vh}
+.info{display:flex;align-items:center;gap:12px;padding:8px 12px}
+.info img{width:36px;height:36px;border-radius:6px;object-fit:cover}
+.info a{color:#0B9444;font-size:13px;text-decoration:none}
+.status{padding:4px 12px;font-size:12px;color:#999}
+</style>
+</head>
+<body>
+<div id="player">
+  <div class="info">
+    {% if channel.logo %}<img src="{{ channel.logo }}" alt="" onerror="this.style.display='none'">{% endif %}
+    <span style="font-size:14px;font-weight:600">{{ channel.name }}</span>
+    <span style="font-size:12px;color:#666">{{ channel.group }}</span>
+    <a href="/iptv">Back</a>
+  </div>
+  <video id="video" autoplay playsinline preload="auto" controls></video>
+  <div class="status" id="status">Loading...</div>
+</div>
+<script>
+var url = {{ channel.url | tojson }};
+var ua = {{ channel.user_agent | tojson }};
+var ref = {{ channel.referer | tojson }};
+var video = document.getElementById('video');
+var status = document.getElementById('status');
+
+function play(url){
+  var isHls = url.includes('.m3u8');
+  if(isHls && typeof Hls !== 'undefined' && Hls.isSupported()){
+    status.textContent = '';
+    var h = new Hls({enableWorker:true});
+    h.attachMedia(video);
+    h.loadSource(url);
+  }else if(isHls && video.canPlayType('application/vnd.apple.mpegurl')){
+    video.src = url;
+    status.textContent = '';
+  }else{
+    video.src = url;
+    status.textContent = '';
+  }
+}
+
+play(url);
+</script>
+</body>
+</html>

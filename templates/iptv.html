@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ZeroLive 2 - IPTV</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='url(%23g)'/><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%23ff2d55'/><stop offset='100%25' stop-color='%237936f7'/></linearGradient></defs><text x='16' y='22' text-anchor='middle' fill='white' font-size='17' font-weight='bold'>Z</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root,[data-theme="dark"]{
+  --bg:#080b14;--bg-elevated:#0d1225;--bg-card:#111830;--bg-hover:#1a2340;
+  --accent-1:#ff2d55;--accent-2:#7936f7;--accent-glow:rgba(121,54,247,.35);
+  --text:#eef2ff;--text-secondary:#949dcc;--text-tertiary:#5c6692;
+  --line:rgba(121,54,247,.12);--line-hover:rgba(121,54,247,.25);
+  --live:#ff2d55;--live-dim:rgba(255,45,85,.12);
+  --radius:14px;--radius-sm:10px;--radius-full:999px;--shadow:0 8px 40px rgba(0,0,0,.5);
+}
+[data-theme="light"]{
+  --bg:#f2f4f8;--bg-elevated:#ffffff;--bg-card:#ffffff;--bg-hover:#eef0f4;
+  --accent-1:#e53935;--accent-2:#7c3aed;--accent-glow:rgba(124,58,237,.18);
+  --text:#1a1d28;--text-secondary:#6b7280;--text-tertiary:#9ca3af;
+  --line:rgba(0,0,0,.08);--line-hover:rgba(0,0,0,.14);--live:#e53935;--live-dim:rgba(229,57,53,.08);
+  --shadow:0 8px 40px rgba(0,0,0,.06);
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+.header{position:sticky;top:0;z-index:100;background:var(--bg-elevated);border-bottom:1px solid var(--line)}
+.header-inner{display:flex;align-items:center;gap:16px;max-width:1400px;margin:0 auto;padding:12px 24px}
+.logo{font-size:20px;font-weight:900;display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text)}
+.logo-icon{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent-1),var(--accent-2));display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff}
+.mode-tabs{display:flex;gap:2px;background:var(--bg-card);border-radius:var(--radius-sm);padding:2px;border:1px solid var(--line)}
+.mode-tab{padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;color:var(--text-tertiary);text-decoration:none;transition:all .2s;letter-spacing:.5px}
+.mode-tab.active{background:var(--accent-2);color:#fff;box-shadow:0 2px 8px var(--accent-glow)}
+.mode-tab:not(.active):hover{color:var(--text)}
+.search-wrap{position:relative;flex:1;max-width:400px}
+.search-wrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--text-tertiary);pointer-events:none}
+.search-input{width:100%;padding:9px 14px 9px 36px;background:var(--bg-card);border:1px solid var(--line);color:var(--text);border-radius:var(--radius-sm);outline:none;font-size:13px}
+.search-input::placeholder{color:var(--text-tertiary)}
+.search-input:focus{border-color:var(--accent-2);box-shadow:0 0 0 3px rgba(121,54,247,.15)}
+.header-actions{display:flex;gap:8px;margin-left:auto;align-items:center}
+.badge{font-size:11px;color:var(--text-tertiary)}
+.theme-picker{background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;cursor:pointer;outline:none;font-family:inherit}
+.content{max-width:1200px;margin:0 auto;padding:16px 24px}
+#stats{font-size:13px;color:var(--text-secondary);margin-bottom:12px}
+#filterBar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.filter-btn{padding:4px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg-card);color:var(--text-secondary);font-size:12px;cursor:pointer;transition:all .2s;font-family:inherit}
+.filter-btn.active{background:var(--accent-2);color:#fff;border-color:var(--accent-2)}
+.filter-btn:hover:not(.active){border-color:var(--accent-2);color:var(--text)}
+#channelGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.channel-card{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);text-decoration:none;color:var(--text);transition:all .2s}
+.channel-card:hover{border-color:var(--accent-2);background:var(--bg-hover);transform:translateY(-1px)}
+.ch-logo{width:40px;height:40px;border-radius:6px;object-fit:cover;background:var(--bg-hover)}
+.ch-info{flex:1;min-width:0}
+.ch-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-group{font-size:11px;color:var(--text-tertiary)}
+@media(max-width:640px){.header-inner{padding:10px 16px;gap:10px}.search-wrap{max-width:180px}#channelGrid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <a href="/" class="logo"><span class="logo-icon">Z</span>ZEROLIVE</a>
+    <div class="mode-tabs">
+      <a href="/" class="mode-tab">ZL1</a>
+      <a href="/iptv" class="mode-tab active">ZL2</a>
+    </div>
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="search" class="search-input" placeholder="Search channels..." autocomplete="off">
+    </div>
+    <div class="header-actions">
+      <select id="themeSelect" class="theme-picker" title="Theme"></select>
+      <span class="badge">{{ total }} channels</span>
+    </div>
+  </div>
+</header>
+<div class="content">
+  <div id="stats"></div>
+  <div id="filterBar"></div>
+  <div id="channelGrid"></div>
+</div>
+<script>
+var THEMES=['dark','light','amethyst','emerald','ruby','ocean','cyberpunk','sunset','nord','matrix','midnight'];
+var themeSelect=document.getElementById('themeSelect');
+themeSelect.innerHTML=THEMES.map(function(t){return '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'}).join('');
+var saved=localStorage.getItem('zl-theme')||'dark';
+document.documentElement.setAttribute('data-theme',saved);
+themeSelect.value=saved;
+themeSelect.addEventListener('change',function(){var t=themeSelect.value;document.documentElement.setAttribute('data-theme',t);localStorage.setItem('zl-theme',t)});
+
+var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
+var channels={{ channels | tojson }};
+var search=document.getElementById('search');
+var filterBar=document.getElementById('filterBar');
+var grid=document.getElementById('channelGrid');
+var stats=document.getElementById('stats');
+var activeGroup='All';
+var query='';
+
+function getGroups(){
+  var g={};g['All']=channels.length;
+  channels.forEach(function(c){var gr=c.group||'Other';g[gr]=(g[gr]||0)+1});
+  return g;
+}
+
+function render(){
+  var q=query.trim().toLowerCase();
+  var f=channels.filter(function(c){
+    if(activeGroup!=='All'&&c.group!==activeGroup)return false;
+    if(!q)return true;
+    return (c.name||'').toLowerCase().includes(q)||(c.group||'').toLowerCase().includes(q);
+  });
+  stats.textContent='Showing '+f.length+' of '+channels.length+' channels';
+  if(!f.length){grid.innerHTML='<div style="padding:40px;text-align:center;color:var(--text-tertiary)">No channels found.</div>';return;}
+  grid.innerHTML=f.map(function(c){
+    return '<a class="channel-card" href="/iptv/watch/'+c.id+'">'+
+      (c.logo?'<img class="ch-logo" src="'+E(c.logo)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">':'<div class="ch-logo" style="background:var(--bg-hover)"></div>')+
+      '<div class="ch-info"><div class="ch-name">'+E(c.name)+'</div><div class="ch-group">'+E(c.group||'')+'</div></div>'+
+    '</a>';
+  }).join('');
+}
+
+function renderFilters(){
+  var groups=getGroups();
+  var keys=Object.keys(groups).sort(function(a,b){return a==='All'?-1:b==='All'?1:0});
+  filterBar.innerHTML=keys.map(function(g){
+    return '<button class="filter-btn'+(activeGroup===g?' active':'')+'" data-group="'+E(g)+'">'+E(g)+' ('+groups[g]+')</button>';
+  }).join('');
+  filterBar.querySelectorAll('.filter-btn').forEach(function(b){
+    b.addEventListener('click',function(){activeGroup=this.dataset.group;renderFilters();render()});
+  });
+}
+
+search.addEventListener('input',function(e){query=e.target.value;render()});
+renderFilters();render();
+</script>
+</body>
+</html>
