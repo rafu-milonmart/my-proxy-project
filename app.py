@@ -622,24 +622,80 @@ def playlist_m3u():
         return '\n'.join(lines)
     return Response(_cached('m3u', _M3U_TTL, _build, _m3u_cache), mimetype='audio/x-mpegurl')
 
-@app.route('/playlist/<slug>.m3u')
-def event_playlist_m3u(slug):
+def _find_event(slug):
+    """Find event by slug (enc_parent / parent / id)."""
+    for e in _get_events():
+        if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
+            return e
+    return None
+
+def _build_playlist_for_event(e, seen_slugs=None):
+    """Build M3U lines for a single event + its IPTV channels."""
+    if seen_slugs is None:
+        seen_slugs = set()
+    slug = e.get('enc_parent') or e.get('parent') or e.get('id')
+    if not slug or slug in seen_slugs:
+        return []
+    seen_slugs.add(slug)
+    lines = []
     streams = _pb_cached(slug)
-    lines = ["#EXTM3U"]
+    t = f"{e.get('team_a_name', '?')} vs {e.get('team_b_name', '?')}"
     for i, s in enumerate(streams):
         u = s.get('stream_url', '')
         if u:
-            lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="LIVE {i+1}",LIVE {i+1}')
+            lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{t} LIVE {i+1}",{t} LIVE {i+1}')
             lines.append(u)
-    ev = _get_events()
-    for e in ev:
-        if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
-            sport = e.get('sport', '')
-            iptv_chs = _get_iptv_channels_for_slug(sport)
-            for ch in iptv_chs:
-                lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
-                lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
-            break
+    sport = e.get('sport', '')
+    iptv_chs = _get_iptv_channels_for_slug(sport)
+    for ch in iptv_chs:
+        lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
+        lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
+    return lines
+
+@app.route('/playlist/<slug>.m3u')
+def event_playlist_m3u(slug):
+    e = _find_event(slug)
+    lines = ["#EXTM3U"]
+    if e:
+        lines.extend(_build_playlist_for_event(e))
+    else:
+        # fallback: treat slug as raw slug even without event match
+        streams = _pb_cached(slug)
+        for i, s in enumerate(streams):
+            u = s.get('stream_url', '')
+            if u:
+                lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="LIVE {i+1}",LIVE {i+1}')
+                lines.append(u)
+    return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
+
+@app.route('/<name>.m3u')
+def custom_playlist_m3u(name):
+    """Friendly .m3u — match by slug, team name, sport, league, or title."""
+    events = _get_events()
+    name_lower = name.lower().replace('-', ' ').replace('_', ' ')
+    seen = set()
+    matches = []
+    for e in events:
+        slug = e.get('enc_parent') or e.get('parent') or e.get('id')
+        if not slug or slug in seen:
+            continue
+        s_slug = str(slug).lower()
+        ta = (e.get('team_a_name') or '').lower()
+        tb = (e.get('team_b_name') or '').lower()
+        title = (e.get('title') or '').lower()
+        sport = (e.get('sport') or '').lower()
+        league = (e.get('league') or '').lower()
+        if (name_lower == s_slug or s_slug.startswith(name_lower) or
+            name_lower in ta or name_lower in tb or name_lower in title or
+            name_lower in sport or name_lower in league):
+            seen.add(slug)
+            matches.append(e)
+    if not matches:
+        return jsonify({"error": "No events found", "query": name}), 404
+    lines = ["#EXTM3U"]
+    seen_slugs = set()
+    for e in matches:
+        lines.extend(_build_playlist_for_event(e, seen_slugs))
     return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
 @app.route('/api/<path:subpath>')
