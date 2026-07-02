@@ -71,6 +71,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple
     </div>
     <div class="header-actions">
       <select id="themeSelect" class="theme-picker" title="Theme"></select>
+      <button id="validateBtn" onclick="validateAll()" style="background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit">Validate</button>
       <span class="badge">{{ total }} channels</span>
     </div>
   </div>
@@ -134,6 +135,31 @@ function renderFilters(){
 
 search.addEventListener('input',function(e){query=e.target.value;render()});
 renderFilters();render();
+
+async function validateAll(){
+  var btn=document.getElementById('validateBtn');
+  btn.textContent='Validating...';btn.disabled=true;
+  try{
+    var r=await fetch('/api/iptv/validate',{method:'POST'});
+    var d=await r.json();
+    if(d.ok){
+      var ok=d.results.filter(function(v){return v==='ok'}).length;
+      var fail=d.results.filter(function(v){return v==='failed'}).length;
+      // Re-fetch channels to update the list
+      var r2=await fetch('/api/iptv/channels');
+      var d2=await r2.json();
+      if(d2.ok){channels=d2.channels;renderFilters();render();}
+      showToast(ok+' ok, '+fail+' blocked');
+    }
+  }catch(e){showToast('Validate failed');}
+  btn.textContent='Validate';btn.disabled=false;
+}
+function showToast(m){
+  var t=document.createElement('div');
+  t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-elevated);border:1px solid var(--line);padding:8px 20px;border-radius:10px;font-size:13px;z-index:999;transition:all .3s';
+  t.textContent=m;document.body.appendChild(t);
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove()},300)},2000);
+}
 </script>
 </body>
 </html>
