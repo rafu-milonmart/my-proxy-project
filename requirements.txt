@@ -2,3 +2,5 @@ flask>=3.0
 curl-cffi>=0.7
 cryptography>=41.0
 gunicorn>=23.0
+hypercorn>=0.17
+asgiref>=3.8

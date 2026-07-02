@@ -3,6 +3,8 @@ cd /d "%~dp0"
 title ZeroLive
 setlocal enabledelayedexpansion
 
+set PYTHONUNBUFFERED=1
+
 set PYTHON_DIR=%~dp0python
 set PYTHON=%PYTHON_DIR%\python.exe
 set PIP=%PYTHON_DIR%\Scripts\pip.exe
