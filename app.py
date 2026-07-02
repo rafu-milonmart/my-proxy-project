@@ -468,6 +468,61 @@ def admin_validate():
     _log.info('Validation done: %d ok, %d blocked', ok_count, len(results) - ok_count)
     return jsonify({'ok': True, 'results': results, 'excluded_ids': list(excluded)})
 
+@app.route('/api/admin/recheck', methods=['POST'])
+def admin_recheck():
+    cat_map, excluded = _read_mappings()
+    to_check = [c for c in _IPTV_CHANNELS if c['id'] in excluded]
+    _log.info('Rechecking %d blocked channels...', len(to_check))
+    results = {}
+    done = 0
+    def _check(ch):
+        target = ch['url']; ua = ch.get('user_agent', ''); ref = ch.get('referer', '')
+        headers = {}
+        if ua: headers['User-Agent'] = ua
+        if ref: headers['Referer'] = ref
+        http = _media_sess()
+        base_url = target[:target.rfind('/') + 1]
+        try:
+            resp = http.get(target, headers=headers or None, timeout=10)
+            if resp.status_code != 200: return ch['id'], False, ch.get('name', '?')
+            text = resp.text
+            try: _iptv_rewrite(text, ch, base_url)
+            except Exception: return ch['id'], False, ch.get('name', '?')
+            seg_url = None
+            for line in text.splitlines():
+                s = line.strip()
+                if s and not s.startswith('#'):
+                    seg_url = urljoin(base_url, s) if not s.startswith('http') else s; break
+            if seg_url:
+                seg_resp = http.get(seg_url, headers=headers or None, timeout=10)
+                if seg_resp.status_code != 200 or len(seg_resp.content) == 0: return ch['id'], False, ch.get('name', '?')
+            key_match = re.search(r'#EXT-X-KEY[^:]*:.*URI="([^"]*)"', text)
+            if key_match:
+                key_url = key_match.group(1)
+                if not key_url.startswith('http'): key_url = urljoin(base_url, key_url)
+                kr = http.get(key_url, headers=headers or None, timeout=10)
+                if kr.status_code != 200 or len(kr.content) == 0: return ch['id'], False, ch.get('name', '?')
+        except Exception:
+            return ch['id'], False, ch.get('name', '?')
+        return ch['id'], True, ch.get('name', '?')
+    with ThreadPoolExecutor(max_workers=30) as pool:
+        futures = [pool.submit(_check, c) for c in to_check]
+        for f in as_completed(futures):
+            try:
+                cid, ok, name = f.result()
+                results[str(cid)] = 'ok' if ok else 'failed'
+                if ok:
+                    excluded.discard(cid)
+                    _log.info('  UNBLOCKED %s (id=%d)', name, cid)
+                done += 1
+                if done % 50 == 0: _log.info('  Progress: %d/%d', done, len(to_check))
+            except Exception:
+                pass
+    _save_mappings(cat_map, excluded)
+    ok_count = sum(1 for v in results.values() if v == 'ok')
+    _log.info('Recheck done: %d unblocked, %d still blocked', ok_count, len(results) - ok_count)
+    return jsonify({'ok': True, 'results': results, 'excluded_ids': list(excluded)})
+
 @app.route('/api/iptv/mappings')
 def iptv_mappings():
     sport = request.args.get('sport', '')
