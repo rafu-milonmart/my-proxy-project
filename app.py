@@ -1,6 +1,6 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin as _urljoin
+from urllib.parse import urlparse, urljoin
 from pathlib import Path
 from flask import Flask, send_from_directory, Response, request, jsonify, render_template
 from curl_cffi import requests as curl_requests
@@ -416,20 +416,39 @@ def admin_validate():
             if resp.status_code != 200:
                 return ch['id'], False, ch.get('name', '?')
             text = resp.text
+            # Test rewrite logic — catches URL/encoding bugs
+            try:
+                _iptv_rewrite(text, ch, base_url)
+            except Exception:
+                return ch['id'], False, ch.get('name', '?')
+            # Find first segment/sub-playlist
             seg_url = None
             for line in text.splitlines():
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    seg_url = _urljoin(base_url, line) if not line.startswith('http') else line
+                s = line.strip()
+                if s and not s.startswith('#'):
+                    seg_url = urljoin(base_url, s) if not s.startswith('http') else s
                     break
             if seg_url:
                 seg_resp = http.get(seg_url, headers=headers or None, timeout=10)
-                ok = seg_resp.status_code == 200
-            else:
-                ok = True
+                if seg_resp.status_code != 200:
+                    return ch['id'], False, ch.get('name', '?')
+                if len(seg_resp.content) == 0:
+                    return ch['id'], False, ch.get('name', '?')
+            # Check encryption key
+            key_match = re.search(r'#EXT-X-KEY[^:]*:.*URI="([^"]*)"', text)
+            if key_match:
+                key_url = key_match.group(1)
+                if not key_url.startswith('http'):
+                    key_url = urljoin(base_url, key_url)
+                try:
+                    kr = http.get(key_url, headers=headers or None, timeout=10)
+                    if kr.status_code != 200 or len(kr.content) == 0:
+                        return ch['id'], False, ch.get('name', '?')
+                except Exception:
+                    return ch['id'], False, ch.get('name', '?')
         except Exception:
-            ok = False
-        return ch['id'], ok, ch.get('name', '?')
+            return ch['id'], False, ch.get('name', '?')
+        return ch['id'], True, ch.get('name', '?')
     with ThreadPoolExecutor(max_workers=30) as pool:
         futures = [pool.submit(_check, c) for c in to_check]
         for f in as_completed(futures):
