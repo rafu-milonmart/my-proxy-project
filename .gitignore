@@ -4,7 +4,6 @@ __pycache__/
 *.swp
 .DS_Store
 *.bat
-!installer.bat
 !Zero_live.bat
 !uninstall.bat
 random_web/
@@ -17,5 +16,4 @@ default_theme.txt
 installer_gui.py
 build_installer.py
 build/
-dist/
 *.spec
