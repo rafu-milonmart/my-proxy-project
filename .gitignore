@@ -13,7 +13,7 @@ logs/
 default_theme.txt
 .update_staging
 .launch_args
-installer_gui.py
+
 build_installer.py
 build/
 *.spec
