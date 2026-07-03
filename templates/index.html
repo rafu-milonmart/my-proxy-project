@@ -443,7 +443,15 @@ img{max-width:100%;display:block}
   transition:all .2s;white-space:nowrap;
 }
 .btn-vlc:hover{background:rgba(255,117,24,.1);border-color:rgba(255,117,24,.35)}
+.btn-customm3u{
+  background:transparent;color:var(--text-tertiary);border:1px solid var(--line);
+  border-radius:4px;font-size:9px;font-weight:600;padding:2px 6px;cursor:pointer;letter-spacing:.5px;
+}
+.btn-customm3u:hover{color:var(--accent);border-color:var(--accent)}
+.btn-customm3u.active{background:rgba(121,54,247,.2);color:var(--accent);border-color:var(--accent)}
 .btn-copym3u{
+
+
   display:inline-flex;align-items:center;gap:4px;
   padding:3px 8px;border-radius:var(--radius-sm);
   font-size:10px;font-weight:700;color:var(--accent-2);
@@ -678,6 +686,27 @@ img{max-width:100%;display:block}
   </div>
 </div>
 
+<div class="modal-overlay" id="customM3UModal">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-header">
+      <span>Name Your M3U</span>
+      <button id="customM3UClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Custom name</label>
+        <input id="customM3UName" type="text" placeholder="e.g. manutd-vs-liverpool" style="width:100%;padding:8px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none;font-family:inherit">
+        <div class="hint" style="margin-top:4px">Access at <span id="customM3UUrl" style="color:var(--accent)">/name.m3u</span></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="modal-btn primary" id="customM3USave"><span class="btn-text">Save</span></button>
+        <button class="modal-btn" id="customM3UDelete" style="display:none">Remove</button>
+      </div>
+      <div id="customM3UList" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;font-size:12px;color:var(--text-secondary);max-height:150px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <section class="howto">
   <div class="howto-title">How to Use</div>
   <div class="howto-grid">
@@ -867,6 +896,7 @@ img{max-width:100%;display:block}
             '<span class="event-cta">'+icon+' '+(live?'Watch Live':soon?'View Stream':'View Stream')+'</span>'+
             '<span class="btn-vlc" data-vlc-slug="'+E(slug)+'" onclick="event.stopPropagation();openInVLC(this.dataset.vlcSlug)" title="Download M3U">VLC</span>'+
             '<span class="btn-copym3u" data-copy-slug="'+E(slug)+'" onclick="event.stopPropagation();copyM3ULink(this.dataset.copySlug)" title="Copy M3U Link">M3U</span>'+
+            '<span class="btn-customm3u'+(window._customNames&&window._customNames[E(slug)]?' active':'')+'" data-slug="'+E(slug)+'" onclick="event.stopPropagation();addCustomM3U(this.dataset.slug,this)" title="Name this M3U">+M3U</span>'+
           '</span>'+
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-tertiary);opacity:.35"><path d="M9 18l6-6-6-6"/></svg>'+
         '</div></a>';
@@ -924,6 +954,13 @@ img{max-width:100%;display:block}
       grid.innerHTML='<div class="empty-state"><h3>Failed to load events</h3><p>Check your connection and try again.</p></div>';
     }).then(function(){refreshBtn.classList.remove('spinning');});
   }
+  // load custom M3U names
+  fetch('/api/custom-m3u').then(function(r){return r.json()}).then(function(d){
+    if (d.ok) {
+      window._customNames = {};
+      for (var n in d.names) window._customNames[d.names[n]] = n;
+    }
+  });
   refreshBtn.addEventListener('click',loadEvents);
   loadEvents();
 
@@ -956,6 +993,72 @@ img{max-width:100%;display:block}
       fallbackCopy(url);
     }
   };
+  var _customM3USlug = '';
+  window.addCustomM3U = function(slug, el) {
+    _customM3USlug = slug;
+    document.getElementById('customM3UModal').classList.add('open');
+    document.getElementById('customM3UName').value = '';
+    document.getElementById('customM3UDelete').style.display = 'none';
+    document.getElementById('customM3UUrl').textContent = '/...m3u';
+    // load existing custom names to check if this slug already has a name
+    fetch('/api/custom-m3u').then(function(r){return r.json()}).then(function(d){
+      if (!d.ok) return;
+      var list = document.getElementById('customM3UList');
+      list.innerHTML = Object.keys(d.names).length
+        ? '<div style="font-weight:600;margin-bottom:4px;color:var(--text)">Saved:</div>' +
+          Object.keys(d.names).map(function(n){
+            var active = d.names[n] === slug;
+            return '<div style="display:flex;justify-content:space-between;padding:3px 0'+(active?';color:var(--accent);font-weight:600':'')+'">'+
+              '<span>'+E(n)+'</span>'+
+              '<span style="color:var(--text-tertiary)">/'+E(n)+'.m3u</span></div>';
+          }).join('')
+        : '<span>No custom M3U names yet.</span>';
+      // if slug already has a name, pre-fill
+      for (var n in d.names) {
+        if (d.names[n] === slug) {
+          document.getElementById('customM3UName').value = n;
+          document.getElementById('customM3UDelete').style.display = '';
+          updateCustomM3UUrl(n);
+          break;
+        }
+      }
+    });
+  };
+  function updateCustomM3UUrl(name) {
+    document.getElementById('customM3UUrl').textContent = '/' + (name || '...') + '.m3u';
+  }
+  document.getElementById('customM3UName').addEventListener('input', function(){
+    updateCustomM3UUrl(this.value.trim().replace(/\s+/g,'-').toLowerCase());
+  });
+  document.getElementById('customM3USave').addEventListener('click', function(){
+    var name = document.getElementById('customM3UName').value.trim().replace(/\s+/g,'-').toLowerCase();
+    if (!name) { showToast('Enter a name'); return; }
+    fetch('/api/custom-m3u', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name, slug:_customM3USlug})})
+      .then(function(r){return r.json()}).then(function(d){
+        if (d.ok) {
+          showToast('Custom M3U saved! /' + name + '.m3u', 'success');
+          document.getElementById('customM3UModal').classList.remove('open');
+          // re-render cards to show updated state
+          render();
+        } else { showToast(d.error || 'Failed to save'); }
+      })['catch'](function(){ showToast('Failed to save'); });
+  });
+  document.getElementById('customM3UDelete').addEventListener('click', function(){
+    var name = document.getElementById('customM3UName').value.trim().replace(/\s+/g,'-').toLowerCase();
+    if (!name) return;
+    fetch('/api/custom-m3u', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name})})
+      .then(function(r){return r.json()}).then(function(d){
+        if (d.ok) {
+          showToast('Custom M3U removed', 'success');
+          document.getElementById('customM3UModal').classList.remove('open');
+          render();
+        } else { showToast('Failed to remove'); }
+      })['catch'](function(){ showToast('Failed to remove'); });
+  });
+  document.getElementById('customM3UClose').addEventListener('click', function(){
+    document.getElementById('customM3UModal').classList.remove('open');
+  });
+
   function fallbackCopy(url) {
     var ta = document.createElement('textarea');
     ta.value = url;

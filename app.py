@@ -224,6 +224,24 @@ def faster():
 IPTV_PLAYLIST = Path(__file__).parent / 'combined-playlist.m3u'
 M3U_SOURCE_FILE = Path(__file__).parent / 'MAINM3U.txt'
 CUSTOM_M3U_FILE = Path(__file__).parent / 'custom_m3u_url.txt'
+CUSTOM_M3U_NAMES_FILE = Path(__file__).parent / 'custom_m3u_names.json'
+_custom_m3u_names = {}  # name -> slug
+
+def _save_custom_m3u_names():
+    try:
+        CUSTOM_M3U_NAMES_FILE.write_text(json.dumps(_custom_m3u_names), encoding='utf-8')
+    except Exception:
+        pass
+
+def _load_custom_m3u_names():
+    global _custom_m3u_names
+    try:
+        if CUSTOM_M3U_NAMES_FILE.exists():
+            _custom_m3u_names = json.loads(CUSTOM_M3U_NAMES_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        _custom_m3u_names = {}
+
+_load_custom_m3u_names()
 
 def _get_m3u_url():
     # Custom URL takes priority over default
@@ -538,9 +556,8 @@ def _validate_channels(to_check, exclude_failures=True):
         cat_map, excluded = _read_mappings()
         changed = False
         for cid_str, ok in results.items():
-            cid = int(cid_str)
-            if not ok and cid not in excluded:
-                excluded.add(cid)
+            if not ok and cid_str not in excluded:
+                excluded.add(cid_str)
                 changed = True
             elif ok and cid in excluded:
                 excluded.discard(cid)
@@ -749,9 +766,21 @@ def event_playlist_m3u(slug):
 
 @app.route('/<name>.m3u')
 def custom_playlist_m3u(name):
-    """Friendly .m3u — match by slug, team name, sport, league, or title."""
+    """Friendly .m3u — exact custom name first, then fuzzy match."""
     events = _get_events()
     name_lower = name.lower().replace('-', ' ').replace('_', ' ')
+
+    # exact custom name match
+    if name in _custom_m3u_names:
+        slug = _custom_m3u_names[name]
+        for e in events:
+            eslug = e.get('enc_parent') or e.get('parent') or e.get('id')
+            if eslug == slug:
+                lines = ["#EXTM3U"]
+                lines.extend(_build_playlist_for_event(e, set()))
+                return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
+
+    # fuzzy match
     seen = set()
     matches = []
     for e in events:
@@ -776,6 +805,25 @@ def custom_playlist_m3u(name):
     for e in matches:
         lines.extend(_build_playlist_for_event(e, seen_slugs))
     return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
+
+@app.route('/api/custom-m3u', methods=['GET', 'POST', 'DELETE'])
+def api_custom_m3u():
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'names': dict(_custom_m3u_names)})
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get('name') or '').strip().lower().replace(' ', '-')
+    slug = (data.get('slug') or '').strip()
+    if request.method == 'DELETE':
+        _custom_m3u_names.pop(name, None)
+        _save_custom_m3u_names()
+        return jsonify({'ok': True})
+    if not name or not slug:
+        return jsonify({'ok': False, 'error': 'name and slug required'}), 400
+    if not re.match(r'^[a-z0-9-]+$', name):
+        return jsonify({'ok': False, 'error': 'name must be lowercase alphanumeric with hyphens'}), 400
+    _custom_m3u_names[name] = slug
+    _save_custom_m3u_names()
+    return jsonify({'ok': True, 'name': name, 'slug': slug})
 
 @app.route('/api/<path:subpath>')
 def proxy_api(subpath):
