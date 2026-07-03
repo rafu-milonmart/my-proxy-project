@@ -301,8 +301,8 @@ class TitleLbl(QLabel):
     def __init__(self, text, colors, size=22, parent=None):
         super().__init__(text, parent)
         self._colors = colors
-        self.setWordWrap(True)
         self._size = size
+        self.setWordWrap(True)
         self._apply()
 
     def set_theme(self, colors):
@@ -310,12 +310,7 @@ class TitleLbl(QLabel):
         self._apply()
 
     def _apply(self):
-        grad = f"qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {self._colors['a1']},stop:1 {self._colors['a2']})"
-        self.setStyleSheet(f"""
-            font-size:{self._size}px; font-weight:900;
-            background:{grad}; -webkit-background-clip:text;
-            background-clip:text; color:transparent;
-        """)
+        self.setStyleSheet(f"font-size:{self._size}px; font-weight:900; color:{self._colors['text']};")
 
 class BodyLbl(QLabel):
     def __init__(self, text, colors, color_key="sec", parent=None):
@@ -471,22 +466,22 @@ class InstallWorker(QThread):
             raise RuntimeError("Cancelled")
 
     def _dl(self, url, path, desc=""):
-        self._dl_label = desc or url.split('/')[-1]
-        self._dl_last_pct = -1
+        lbl = desc or url.split('/')[-1]
+        self.log.emit(f"[DL] {lbl}")
+        last = -1
         def reporthook(c, b, t):
+            nonlocal last
             if self._cancel:
                 raise RuntimeError("Cancelled")
             if t > 0:
                 pct = c * b * 100.0 / t
                 pct = min(pct, 100.0)
-                # throttle: only emit when crossing a 2% threshold
-                ip = int(pct // 2)
-                if ip != self._dl_last_pct:
-                    self._dl_last_pct = ip
-                    self.log.emit(f"⬇  {self._dl_label} — {pct:.2f}%")
-        self.log.emit(f"⬇  {self._dl_label}")
+                ip = int(pct // 5)
+                if ip != last:
+                    last = ip
+                    self.log.emit(f"     {pct:.0f}%")
         urllib.request.urlretrieve(url, path, reporthook=reporthook)
-        self.log.emit(f"✅  {self._dl_label} — 100.00%")
+        self.log.emit(f"[OK] {lbl}")
 
     def run(self):
         try:
@@ -507,7 +502,7 @@ class InstallWorker(QThread):
 
             for pth in pdir.glob("python*._pth"):
                 pth.write_text(pth.read_text().replace("#import site", "import site"))
-            self.log.emit("✅  Python extracted, site-packages enabled")
+            self.log.emit("[OK]  Python extracted, site-packages enabled")
 
             # ── 2  pip ──
             self.progress.emit(26, "Setting up pip…")
@@ -520,7 +515,7 @@ class InstallWorker(QThread):
             )
             pip_py.unlink(missing_ok=True)
             if r.returncode != 0:
-                self.log.emit(f"⚠  get-pip.py exit {r.returncode}, retrying with --trusted-host")
+                self.log.emit(f"[WARN]  get-pip.py exit {r.returncode}, retrying with --trusted-host")
                 subprocess.run(
                     [str(py_exe), str(pip_py), "--no-setuptools", "--no-wheel",
                      "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org"],
@@ -528,7 +523,7 @@ class InstallWorker(QThread):
                 )
 
             pip_exe = pdir / "Scripts" / "pip.exe"
-            self.log.emit("✅  pip ready")
+            self.log.emit("[OK]  pip ready")
 
             # ── 3  App files ──
             self._check()
@@ -558,7 +553,7 @@ class InstallWorker(QThread):
                 else:
                     shutil.copy2(item, dst)
             shutil.rmtree(extract_dir, ignore_errors=True)
-            self.log.emit("✅  App files copied")
+            self.log.emit("[OK]  App files copied")
 
             # ── 4  Dependencies ──
             self._check()
@@ -567,9 +562,9 @@ class InstallWorker(QThread):
             if req.exists():
                 cmd = [str(pip_exe)] if pip_exe.exists() else [str(py_exe), "-m", "pip"]
                 subprocess.run(cmd + ["install", "-r", str(req), "--quiet"], timeout=180)
-                self.log.emit("✅  Dependencies installed")
+                self.log.emit("[OK]  Dependencies installed")
             else:
-                self.log.emit("⚠  No requirements.txt found")
+                self.log.emit("[WARN]  No requirements.txt found")
 
             # ── 5  Version ──
             self._check()
@@ -580,7 +575,7 @@ class InstallWorker(QThread):
                 with urllib.request.urlopen(r, timeout=10) as f:
                     sha = json.loads(f.read())["sha"]
                 (base / "version.txt").write_text(sha)
-                self.log.emit(f"✅  Version {sha[:12]}")
+                self.log.emit(f"[OK]  Version {sha[:12]}")
             except Exception:
                 (base / "version.txt").write_text("1.0.0")
 
@@ -603,7 +598,7 @@ class InstallWorker(QThread):
                 ])
                 subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                                capture_output=True, timeout=30)
-                self.log.emit("✅  Desktop shortcuts created")
+                self.log.emit("[OK]  Desktop shortcuts created")
 
             # ── 7  Firewall ──
             self._check()
@@ -615,7 +610,7 @@ class InstallWorker(QThread):
                      f"program={pdir / 'python.exe'}", "profile=private", "enable=yes"],
                     capture_output=True, timeout=15,
                 )
-                self.log.emit("✅  Firewall rule added")
+                self.log.emit("[OK]  Firewall rule added")
 
             # ── 8  README ──
             readme = base / "readme.txt"
@@ -633,7 +628,7 @@ class InstallWorker(QThread):
                     "  ↑↓     – Volume\n\n"
                     "🔸 Double-click 'ZeroLive Uninstall' to remove\n"
                 )
-                self.log.emit("✅  README created")
+                self.log.emit("[OK]  README created")
 
             # ── 9  Zero_live.bat ──
             if repo_root:
@@ -931,12 +926,7 @@ class InstallerWindow(QWidget):
                 stop:0 {a1}, stop:1 {a2});
             color:#fff; font-size:15px; font-weight:800; border-radius:8px;
         """)
-        self._title.setStyleSheet(f"""
-            font-size:24px; font-weight:900; letter-spacing:1px;
-            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 {a1}, stop:1 {a2});
-            -webkit-background-clip:text; background-clip:text; color:transparent;
-        """)
+        self._title.setStyleSheet(f"font-size:24px; font-weight:900; letter-spacing:1px; color:#fff;")
         self._header_sub.setStyleSheet(f"color:{self._colors['tert']}; font-size:12px; font-weight:500; letter-spacing:1px;")
         self._brand.setStyleSheet(f"color:{self._colors['tert']}; font-size:9px; font-weight:700; letter-spacing:2px; padding:6px 0;")
         for s in self._step_seps:
