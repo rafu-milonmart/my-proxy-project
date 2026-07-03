@@ -552,6 +552,10 @@ class InstallWorker(QThread):
                     shutil.copytree(item, dst, dirs_exist_ok=True)
                 else:
                     shutil.copy2(item, dst)
+            # Copy Zero_live.bat before deleting extract_dir
+            src_bat = repo_root / "Zero_live.bat"
+            if src_bat.exists():
+                shutil.copy2(src_bat, base / "Zero_live.bat")
             shutil.rmtree(extract_dir, ignore_errors=True)
             self.log.emit("[OK]  App files copied")
 
@@ -619,24 +623,18 @@ class InstallWorker(QThread):
                     "╔══════════════════════════════════════╗\n"
                     "║    ZeroLive – Free Sports Streaming  ║\n"
                     "╚══════════════════════════════════════╝\n\n"
-                    "🔸 Double-click 'ZeroLive' on desktop to start\n"
-                    "🔸 Opens at http://127.0.0.1:9090\n\n"
+                    "*  Double-click 'ZeroLive' on desktop to start\n"
+                    "*  Opens at http://127.0.0.1:9090\n\n"
                     "CONTROLS:\n"
                     "  Space  – Play/Pause        F  – Fullscreen\n"
                     "  M      – Mute/Unmute        I  – Stream Info\n"
                     "  S      – Speed               ←→ – Seek\n"
                     "  ↑↓     – Volume\n\n"
-                    "🔸 Double-click 'ZeroLive Uninstall' to remove\n"
+                    "*  Double-click 'ZeroLive Uninstall' to remove\n"
                 )
                 self.log.emit("[OK]  README created")
 
-            # ── 9  Zero_live.bat ──
-            if repo_root:
-                src_bat = repo_root / "Zero_live.bat"
-                if src_bat.exists():
-                    shutil.copy2(src_bat, base / "Zero_live.bat")
-
-            # ── 10  Default theme ──
+            # ── 9  Default theme ──
             (base / "default_theme.txt").write_text(self._theme)
 
             self.progress.emit(100, "Complete!")
