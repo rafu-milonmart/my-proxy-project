@@ -210,11 +210,17 @@ def faster():
 # ---------------------------------------------------------------------------
 IPTV_PLAYLIST = Path(__file__).parent / 'combined-playlist.m3u'
 M3U_SOURCE_FILE = Path(__file__).parent / 'MAINM3U.txt'
+CUSTOM_M3U_FILE = Path(__file__).parent / 'custom_m3u_url.txt'
 
 def _get_m3u_url():
+    # Custom URL takes priority over default
+    if CUSTOM_M3U_FILE.exists():
+        url = CUSTOM_M3U_FILE.read_text(encoding='utf-8').strip()
+        if url:
+            return url
     if M3U_SOURCE_FILE.exists():
         return M3U_SOURCE_FILE.read_text(encoding='utf-8').strip()
-    return 'https://raw.githubusercontent.com/abusaeeidx/IPTV-Scraper-Zilla/refs/heads/main/combined-playlist.m3u'
+    return 'https://raw.githubusercontent.com/abusaeeidx/Mrgify-BDIX-IPTV/refs/heads/main/playlist.m3u'
 _IPTV_CHANNELS = []
 _SPORTS_GROUP_NAMES = {'Pixelsports','CricHD'}
 _SPORTS_KEYWORDS = ['nfl','nba','mlb','nhl','ncaa','espn','fox sports','nfl network','nba tv',
@@ -250,10 +256,10 @@ def _load_iptv():
     text = IPTV_PLAYLIST.read_text(encoding='utf-8')
     lines = text.splitlines()
     i = 0
-    cid = 0
+    old_idx = 0
     while i < len(lines):
         if lines[i].startswith('#EXTINF:'):
-            entry = {'id': cid, 'name': '', 'logo': '', 'group': '', 'url': '', 'user_agent': '', 'referer': '', 'tvg_id': ''}
+            entry = {'id': '', 'name': '', 'logo': '', 'group': '', 'url': '', 'user_agent': '', 'referer': '', 'tvg_id': ''}
             infoline = lines[i]
             m = re.search(r'tvg-id="([^"]*)"', infoline)
             if m: entry['tvg_id'] = m.group(1)
@@ -275,13 +281,54 @@ def _load_iptv():
             if i < len(lines) and not lines[i].startswith('#'):
                 entry['url'] = lines[i].strip()
             if entry['name'] and entry['url'] and _is_sports(entry):
-                entry['id'] = cid
+                # Stable ID from URL hash — survives M3U re-downloads
+                entry['id'] = hashlib.md5(entry['url'].encode()).hexdigest()[:12]
+                entry['_old_idx'] = old_idx
+                old_idx += 1
                 _IPTV_CHANNELS.append(entry)
-                cid += 1
         i += 1
 
 _load_iptv()
 _log.info('Loaded %d IPTV channels', len(_IPTV_CHANNELS))
+
+def _refresh_iptv_loop():
+    while True:
+        time.sleep(3600)
+        try:
+            _load_iptv()
+            _log.info('M3U refreshed: %d channels', len(_IPTV_CHANNELS))
+        except Exception:
+            _log.warning('M3U refresh failed', exc_info=True)
+
+threading.Thread(target=_refresh_iptv_loop, daemon=True).start()
+
+def _migrate_mappings():
+    if not MAPPINGS_FILE.exists():
+        return
+    try:
+        d = json.loads(MAPPINGS_FILE.read_text())
+        cat_map = d.get('category_mappings', {})
+        excluded = d.get('excluded_ids', [])
+        all_vals = []
+        for v in cat_map.values():
+            all_vals.extend(v)
+        all_vals.extend(excluded)
+        if not all_vals:
+            return
+        # Check if migration needed (old format = integer IDs)
+        if not all(isinstance(x, str) for x in all_vals):
+            old_to_new = {}
+            for ch in _IPTV_CHANNELS:
+                if ch.get('_old_idx') is not None:
+                    old_to_new[ch['_old_idx']] = ch['id']
+            new_cat = {}
+            for cat, ids in cat_map.items():
+                new_cat[cat] = [old_to_new.get(i, str(i)) for i in ids]
+            new_exc = [old_to_new.get(i, str(i)) for i in excluded]
+            _save_mappings(new_cat, set(new_exc))
+            _log.info('Migrated admin_mappings.json from positional IDs to stable URL-hash IDs')
+    except Exception as e:
+        _log.warning('Mapping migration skipped: %s', e)
 
 # ---------------------------------------------------------------------------
 # Event helpers
@@ -312,6 +359,8 @@ def _save_mappings(cat_map, excluded):
         'category_mappings': cat_map,
         'excluded_ids': list(excluded)
     }, indent=2))
+
+_migrate_mappings()
 
 def _get_mapped_ids():
     cat_map, _ = _read_mappings()
@@ -510,6 +559,23 @@ def admin_recheck():
     _log.info('Recheck done: %d unblocked, %d still blocked', ok_count, len(results) - ok_count)
     return jsonify({'ok': True, 'results': {k: 'ok' if v else 'failed' for k, v in results.items()}, 'excluded_ids': list(excluded)})
 
+@app.route('/api/iptv/m3u-url', methods=['GET', 'POST'])
+def iptv_m3u_url():
+    if request.method == 'POST':
+        data = request.get_json(force=True, silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if url:
+            CUSTOM_M3U_FILE.write_text(url, encoding='utf-8')
+        elif CUSTOM_M3U_FILE.exists():
+            CUSTOM_M3U_FILE.unlink()
+        _load_iptv()
+        _log.info('Custom M3U URL set, reloaded %d channels', len(_IPTV_CHANNELS))
+        return jsonify({'ok': True, 'total': len(_IPTV_CHANNELS)})
+    current = ''
+    if CUSTOM_M3U_FILE.exists():
+        current = CUSTOM_M3U_FILE.read_text(encoding='utf-8').strip()
+    return jsonify({'ok': True, 'url': current, 'source': 'custom' if current else 'default'})
+
 @app.route('/api/iptv/mappings')
 def iptv_mappings():
     sport = request.args.get('sport', '')
@@ -551,7 +617,7 @@ def iptv_validate():
     _log.info('Public validate done: %d ok, %d blocked', ok_count, len(results) - ok_count)
     return jsonify({'ok': True, 'results': ['ok' if v else 'failed' for v in results.values()], 'excluded_ids': list(excluded)})
 
-@app.route('/iptv/watch/<int:channel_id>')
+@app.route('/iptv/watch/<channel_id>')
 def iptv_watch(channel_id):
     for c in _IPTV_CHANNELS:
         if c['id'] == channel_id:
@@ -743,7 +809,7 @@ def _iptv_rewrite(body, ch, base_dir=''):
             out.append(f'{prefix}{b64}')
     return '\n'.join(out)
 
-@app.route('/proxy/iptv/<int:channel_id>/')
+@app.route('/proxy/iptv/<channel_id>/')
 def proxy_iptv(channel_id):
     ch = None
     for c in _IPTV_CHANNELS:
@@ -781,7 +847,7 @@ def proxy_iptv(channel_id):
                 time.sleep(1)
     return jsonify({"error": "Upstream failed"}), 502
 
-@app.route('/proxy/iptv/<int:channel_id>/seg/<path:b64url>')
+@app.route('/proxy/iptv/<channel_id>/seg/<path:b64url>')
 def proxy_iptv_seg(channel_id, b64url):
     ch = None
     for c in _IPTV_CHANNELS:

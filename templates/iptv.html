@@ -70,6 +70,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple
       <input id="search" class="search-input" placeholder="Search channels..." autocomplete="off">
     </div>
     <div class="header-actions">
+      <input id="m3uUrlInput" style="width:220px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:11px;outline:none;font-family:inherit" placeholder="Custom M3U URL (optional)">
+      <button id="m3uApplyBtn" onclick="applyM3U()" style="background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit">Load</button>
       <select id="themeSelect" class="theme-picker" title="Theme"></select>
       <button id="validateBtn" onclick="validateAll()" style="background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit">Validate</button>
       <span class="badge">{{ total }} channels</span>
@@ -136,6 +138,28 @@ function renderFilters(){
 search.addEventListener('input',function(e){query=e.target.value;render()});
 renderFilters();render();
 
+// Load current custom M3U URL
+fetch('/api/iptv/m3u-url').then(function(r){return r.json()}).then(function(d){
+  if(d.ok && d.url) document.getElementById('m3uUrlInput').value = d.url;
+})['catch'](function(){});
+
+async function applyM3U(){
+  var url=document.getElementById('m3uUrlInput').value.trim();
+  var btn=document.getElementById('m3uApplyBtn');
+  btn.textContent='Loading...';btn.disabled=true;
+  try{
+    var r=await fetch('/api/iptv/m3u-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url})});
+    var d=await r.json();
+    if(d.ok){
+      var r2=await fetch('/api/iptv/channels');
+      var d2=await r2.json();
+      if(d2.ok){channels=d2.channels;renderFilters();render();document.querySelector('.badge').textContent=d2.total+' channels';}
+      showToast('Loaded '+d.total+' channels');
+    }
+  }catch(e){showToast('Failed to load M3U');}
+  btn.textContent='Load';btn.disabled=false;
+}
+
 async function validateAll(){
   var btn=document.getElementById('validateBtn');
   btn.textContent='Validating...';btn.disabled=true;
@@ -148,7 +172,7 @@ async function validateAll(){
       // Re-fetch channels to update the list
       var r2=await fetch('/api/iptv/channels');
       var d2=await r2.json();
-      if(d2.ok){channels=d2.channels;renderFilters();render();}
+      if(d2.ok){channels=d2.channels;renderFilters();render();document.querySelector('.badge').textContent=d2.total+' channels';}
       showToast(ok+' ok, '+fail+' blocked');
     }
   }catch(e){showToast('Validate failed');}
