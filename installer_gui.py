@@ -471,11 +471,22 @@ class InstallWorker(QThread):
             raise RuntimeError("Cancelled")
 
     def _dl(self, url, path, desc=""):
+        self._dl_label = desc or url.split('/')[-1]
+        self._dl_last_pct = -1
         def reporthook(c, b, t):
             if self._cancel:
                 raise RuntimeError("Cancelled")
-        self.log.emit(f"⬇  {desc or url.split('/')[-1]}")
+            if t > 0:
+                pct = c * b * 100.0 / t
+                pct = min(pct, 100.0)
+                # throttle: only emit when crossing a 2% threshold
+                ip = int(pct // 2)
+                if ip != self._dl_last_pct:
+                    self._dl_last_pct = ip
+                    self.log.emit(f"⬇  {self._dl_label} — {pct:.2f}%")
+        self.log.emit(f"⬇  {self._dl_label}")
         urllib.request.urlretrieve(url, path, reporthook=reporthook)
+        self.log.emit(f"✅  {self._dl_label} — 100.00%")
 
     def run(self):
         try:
@@ -699,29 +710,18 @@ class InstallerWindow(QWidget):
 
         logo_row = QHBoxLayout()
         logo_row.setSpacing(10)
-        logo_badge = QLabel("Z")
-        logo_badge.setFixedSize(30, 30)
-        logo_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_badge.setStyleSheet(f"""
-            background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
-                stop:0 {self._colors["a1"]}, stop:1 {self._colors["a2"]});
-            color:#fff; font-size:15px; font-weight:800; border-radius:8px;
-        """)
-        logo_row.addWidget(logo_badge)
-        title = QLabel("ZeroLive")
-        title.setStyleSheet(f"""
-            font-size:24px; font-weight:900; letter-spacing:1px;
-            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 {self._colors["a1"]}, stop:1 {self._colors["a2"]});
-            -webkit-background-clip:text; background-clip:text; color:transparent;
-        """)
-        logo_row.addWidget(title)
+        self._logo_badge = QLabel("Z")
+        self._logo_badge.setFixedSize(30, 30)
+        self._logo_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_row.addWidget(self._logo_badge)
+        self._title = QLabel("ZeroLive")
+        logo_row.addWidget(self._title)
         logo_row.addStretch()
         hl.addLayout(logo_row)
 
-        sub = QLabel("Interactive Installer")
-        sub.setStyleSheet(f"color:{self._colors['tert']}; font-size:12px; font-weight:500; letter-spacing:1px; margin-left:40px;")
-        hl.addWidget(sub)
+        self._header_sub = QLabel("Interactive Installer")
+        self._header_sub.setContentsMargins(40, 0, 0, 0)
+        hl.addWidget(self._header_sub)
         root.addWidget(header)
 
         # ── Step indicator ──
@@ -730,10 +730,12 @@ class InstallerWindow(QWidget):
         root.addWidget(self._step_lbl)
 
         # steps bar
-        self._steps_bar = QHBoxLayout()
+        steps_bar_w = QWidget()
+        self._steps_bar = QHBoxLayout(steps_bar_w)
         self._steps_bar.setContentsMargins(36, 4, 36, 8)
         self._steps_bar.setSpacing(6)
         self._step_dots = []
+        self._step_seps = []
         for name in STEPS:
             dot = QLabel(f"● {name}")
             dot.setStyleSheet(f"color:{self._colors['tert']}; font-size:10px; font-weight:600;")
@@ -741,11 +743,13 @@ class InstallerWindow(QWidget):
             self._steps_bar.addWidget(dot)
             if name != STEPS[-1]:
                 sep = QLabel("─")
-                sep.setStyleSheet(f"color:{_alpha(self._colors['a2'], 0.12).name()}; font-size:10px;")
+                self._step_seps.append(sep)
                 self._steps_bar.addWidget(sep)
             self._steps_bar.addStretch(0)
         self._steps_bar.addStretch()
-        root.addLayout(self._steps_bar)
+        root.addWidget(steps_bar_w)
+
+        self._sync_header_theme()
 
         # ── Card ──
         self._card = GlassCard(self._colors)
@@ -791,10 +795,10 @@ class InstallerWindow(QWidget):
         root.addWidget(footer)
 
         # Brand
-        brand = QLabel("MADE BY RAFIUL HASAN RAFI")
-        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand.setStyleSheet(f"color:{self._colors['tert']}; font-size:9px; font-weight:700; letter-spacing:2px; padding:6px 0;")
-        root.addWidget(brand)
+        self._brand = QLabel("MADE BY RAFIUL HASAN RAFI")
+        self._brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._brand.setStyleSheet(f"color:{self._colors['tert']}; font-size:9px; font-weight:700; letter-spacing:2px; padding:6px 0;")
+        root.addWidget(self._brand)
 
         self._show_page(0)
         self._update_steps(0)
@@ -921,11 +925,30 @@ class InstallerWindow(QWidget):
         scroll_area.setWidget(scroll_content)
         self._card_layout.addWidget(scroll_area, 1)
 
+    def _sync_header_theme(self):
+        a1, a2 = self._colors["a1"], self._colors["a2"]
+        self._logo_badge.setStyleSheet(f"""
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 {a1}, stop:1 {a2});
+            color:#fff; font-size:15px; font-weight:800; border-radius:8px;
+        """)
+        self._title.setStyleSheet(f"""
+            font-size:24px; font-weight:900; letter-spacing:1px;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 {a1}, stop:1 {a2});
+            -webkit-background-clip:text; background-clip:text; color:transparent;
+        """)
+        self._header_sub.setStyleSheet(f"color:{self._colors['tert']}; font-size:12px; font-weight:500; letter-spacing:1px;")
+        self._brand.setStyleSheet(f"color:{self._colors['tert']}; font-size:9px; font-weight:700; letter-spacing:2px; padding:6px 0;")
+        for s in self._step_seps:
+            s.setStyleSheet(f"color:{_alpha(self._colors['a2'], 0.12).name()}; font-size:10px;")
+
     def _on_theme_selected(self, name):
         for n, s in self._theme_swatches.items():
             s.set_active(n == name)
         self._theme_name = name
         self._colors = dict(THEMES[name])
+        self._sync_header_theme()
         self._orb_bg.set_theme(self._colors)
         self._card.set_theme(self._colors)
         self._apply_root_style()
@@ -934,18 +957,6 @@ class InstallerWindow(QWidget):
         self._back_btn.set_theme(self._colors)
         self._cancel_btn.set_theme(self._colors)
         self._update_steps(self._page)
-
-        for w in self.findChildren(QLabel):
-            if w.text() == "ZeroLive":
-                w.setStyleSheet(f"""
-                    font-size:24px; font-weight:900; letter-spacing:1px;
-                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 {self._colors["a1"]}, stop:1 {self._colors["a2"]});
-                    -webkit-background-clip:text; background-clip:text; color:transparent;
-                """)
-                break
-        for w in self.findChildren(StepLbl):
-            w.set_theme(self._colors)
 
     # ── Page 2: Options ───────────────────────────────────────────────────
     def _show_options_page(self):
