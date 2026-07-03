@@ -4,16 +4,12 @@ __pycache__/
 *.swp
 .DS_Store
 *.bat
-!Zero_live.bat
-!uninstall.bat
 random_web/
 version.txt
-combined-playlist.m3u
 logs/
 default_theme.txt
 .update_staging
 .launch_args
-custom_m3u_names.json
 
 build_installer.py
 build/

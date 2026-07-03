@@ -1082,7 +1082,7 @@ class InstallerWindow(QWidget):
             else:
                 self.close()
         elif t == "Close":
-            self.close()
+            self._quit_app()
 
     def _on_back(self):
         if self._page > 0:
@@ -1095,7 +1095,7 @@ class InstallerWindow(QWidget):
             self._cancel_btn.setText("Cancelling…")
             self._nav_btn.setEnabled(False)
         else:
-            self.close()
+            self._quit_app()
 
     def _start_install(self):
         dest = Path(self._path_picker.path)
@@ -1131,8 +1131,17 @@ class InstallerWindow(QWidget):
     def _launch(self):
         bat = Path(self._path_picker.path) / "Zero_live.bat"
         if bat.exists():
-            subprocess.Popen([str(bat)], cwd=str(bat.parent))
+            subprocess.Popen(
+                ['cmd.exe', '/c', 'start', '', str(bat)],
+                cwd=str(bat.parent), shell=False,
+                creationflags=subprocess.DETACHED_PROCESS,
+                stdin=None, stdout=None, stderr=None
+            )
+        self._quit_app()
+
+    def _quit_app(self):
         self.close()
+        QApplication.quit()
 
     def _open_folder(self):
         os.startfile(self._path_picker.path)
