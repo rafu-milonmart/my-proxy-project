@@ -1,4 +1,4 @@
-import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio, shutil
+import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio, shutil, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from pathlib import Path
@@ -22,12 +22,20 @@ UPSTREAM = "https://s1.sportzfytvlive.xyz"
 DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
 VERSION_FILE = STATIC_DIR / 'version.txt'
-CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
 DEFAULT_THEME_FILE = STATIC_DIR / 'default_theme.txt'
-DEFAULT_THEME = DEFAULT_THEME_FILE.read_text().strip() if DEFAULT_THEME_FILE.exists() else 'dark'
 GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
 DEBUG = os.environ.get('ZL_DEBUG', '0') == '1'
 _LAUNCH_ARGS = None  # saved by __main__ for restart
+
+def _get_current_version():
+    return VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
+
+def _get_current_version_short():
+    v = _get_current_version()
+    return v[:12] if v != 'unknown' else v
+
+def _get_default_theme():
+    return DEFAULT_THEME_FILE.read_text().strip() if DEFAULT_THEME_FILE.exists() else 'dark'
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = DEBUG
@@ -36,8 +44,8 @@ asgi_app = WsgiToAsgi(app)
 @app.context_processor
 def _inject_globals():
     return {
-        'default_theme': DEFAULT_THEME,
-        'current_version': CURRENT_VERSION,
+        'default_theme': _get_default_theme(),
+        'current_version': _get_current_version_short(),
     }
 
 LOG_DIR = STATIC_DIR / 'logs'
@@ -979,20 +987,20 @@ def proxy_manifest(slug, idx):
 # ---------------------------------------------------------------------------
 @app.route('/api/default-theme')
 def api_default_theme():
-    return jsonify({'ok': True, 'theme': DEFAULT_THEME})
+    return jsonify({'ok': True, 'theme': _get_default_theme()})
 
 @app.route('/api/version')
 def api_version():
-    return jsonify({'ok': True, 'version': CURRENT_VERSION})
+    return jsonify({'ok': True, 'version': _get_current_version()})
 
 @app.route('/api/update/check')
 def update_check():
     try:
-        import urllib.request
+        cv = _get_current_version()
         r = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
         with urllib.request.urlopen(r, timeout=10) as f:
             latest = json.loads(f.read())['sha']
-        return jsonify({'ok': True, 'current': CURRENT_VERSION[:12], 'latest': latest[:12], 'has_updates': latest != CURRENT_VERSION})
+        return jsonify({'ok': True, 'current': cv[:12], 'latest': latest[:12], 'has_updates': latest != cv})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
 
