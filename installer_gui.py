@@ -749,8 +749,6 @@ class InstallerWindow(QWidget):
         self._steps_bar.addStretch()
         root.addWidget(steps_bar_w)
 
-        self._sync_header_theme()
-
         # ── Card ──
         self._card = GlassCard(self._colors)
         self._card_layout = QVBoxLayout(self._card)
@@ -800,6 +798,7 @@ class InstallerWindow(QWidget):
         self._brand.setStyleSheet(f"color:{self._colors['tert']}; font-size:9px; font-weight:700; letter-spacing:2px; padding:6px 0;")
         root.addWidget(self._brand)
 
+        self._sync_header_theme()
         self._show_page(0)
         self._update_steps(0)
 
