@@ -713,7 +713,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px;position:relative;z-i
   </div>
 </div>
 
-<footer class="footer">ZeroLive 2 &mdash; IPTV Sports</footer>
+<footer class="footer">ZeroLive 2 &mdash; IPTV Sports<br><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;opacity:.5">MADE BY RAFIUL HASAN RAFI</span></footer>
 
 <script>
 (function(){
@@ -1063,7 +1063,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px;position:relative;z-i
   var themeIcon=document.getElementById('themeIcon');
   var themeLabel=document.getElementById('themeLabel');
   var themePanel=document.getElementById('themePanel');
-  var currentTheme=localStorage.getItem('zl2-theme')||'dark';
+  var currentTheme=localStorage.getItem('zl2-theme')||'{{ default_theme }}';
   var systemDarkQuery=window.matchMedia('(prefers-color-scheme:dark)');
   function resolveTheme(t){
     if(t==='system')return systemDarkQuery.matches?'dark':'light';

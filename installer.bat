@@ -10,7 +10,7 @@ echo.
 
 set INSTALL_DIR=C:\Zero_live
 set PYTHON_DIR=%INSTALL_DIR%\python
-set PYTHON_VERSION=3.12.5
+set PYTHON_VERSION=3.13.5
 
 REM Always download fresh from GitHub (installer runs from Downloads folder)
 set GITHUB_REPO=https://github.com/rafu-milonmart/my-proxy-project

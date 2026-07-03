@@ -20,21 +20,29 @@ echo Checking for updates...
 set VERSION_FILE=%~dp0version.txt
 set GITHUB_API=https://api.github.com/repos/rafu-milonmart/my-proxy-project/commits/master
 
-for /f %%a in ('powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing | ConvertFrom-Json; Write-Output $r.sha } catch { Write-Output '' }"') do set LATEST_SHA=%%a
+for /f %%a in ('powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing | ConvertFrom-Json; Write-Output $r.sha } catch { Write-Output '__FAIL__' }"') do set LATEST_SHA=%%a
 
-if defined LATEST_SHA (
+if not "!LATEST_SHA!"=="__FAIL__" if not "!LATEST_SHA!"=="" (
     set LOCAL_SHA=
     if exist "!VERSION_FILE!" set /p LOCAL_SHA=<"!VERSION_FILE!"
     if not "!LATEST_SHA!"=="!LOCAL_SHA!" (
         echo.
         echo [UPDATE] New version found! Downloading...
         powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
-        robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%~dp0" /E /XF "Zero_live.bat" "version.txt" /XD "python" >nul 2>&1
-        echo !LATEST_SHA! > "!VERSION_FILE!"
-        "%PIP%" install -r requirements.txt --quiet
+        robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%~dp0" /E /XF "Zero_live.bat" /XD "python"
+        if !errorlevel! lss 8 (
+            echo !LATEST_SHA! > "!VERSION_FILE!"
+            if exist "%PIP%" (
+                "%PIP%" install -r requirements.txt --quiet
+            ) else (
+                "%PYTHON%" -m pip install -r requirements.txt --quiet
+            )
+            echo Updated to latest version.
+        ) else (
+            echo [WARN] Update copy failed (robocopy exit !errorlevel!). Skipping.
+        )
         del "%TEMP%\zero_live_update.zip" >nul 2>&1
         rmdir /S /Q "%TEMP%\zero_live_update" >nul 2>&1
-        echo Updated to latest version.
     ) else (
         echo You are up to date.
     )

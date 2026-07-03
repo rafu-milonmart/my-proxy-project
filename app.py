@@ -1,4 +1,4 @@
-import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio
+import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio, shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from pathlib import Path
@@ -23,6 +23,8 @@ DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
 VERSION_FILE = STATIC_DIR / 'version.txt'
 CURRENT_VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else 'unknown'
+DEFAULT_THEME_FILE = STATIC_DIR / 'default_theme.txt'
+DEFAULT_THEME = DEFAULT_THEME_FILE.read_text().strip() if DEFAULT_THEME_FILE.exists() else 'dark'
 GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
 DEBUG = os.environ.get('ZL_DEBUG', '0') == '1'
 _LAUNCH_ARGS = None  # saved by __main__ for restart
@@ -30,6 +32,13 @@ _LAUNCH_ARGS = None  # saved by __main__ for restart
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = DEBUG
 asgi_app = WsgiToAsgi(app)
+
+@app.context_processor
+def _inject_globals():
+    return {
+        'default_theme': DEFAULT_THEME,
+        'current_version': CURRENT_VERSION,
+    }
 
 LOG_DIR = STATIC_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
@@ -192,10 +201,6 @@ def add_cors(resp):
         resp.headers['Access-Control-Allow-Headers'] = '*'
         resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     return resp
-
-@app.context_processor
-def inject_version():
-    return {'current_version': CURRENT_VERSION}
 
 @app.route('/')
 def index():
@@ -972,6 +977,10 @@ def proxy_manifest(slug, idx):
 # ---------------------------------------------------------------------------
 # Version / Update
 # ---------------------------------------------------------------------------
+@app.route('/api/default-theme')
+def api_default_theme():
+    return jsonify({'ok': True, 'theme': DEFAULT_THEME})
+
 @app.route('/api/version')
 def api_version():
     return jsonify({'ok': True, 'version': CURRENT_VERSION})
@@ -990,38 +999,87 @@ def update_check():
 @app.route('/api/update/apply')
 def update_apply():
     try:
-        import urllib.request, zipfile, io, tempfile, shutil
+        import urllib.request, zipfile, io, tempfile
         base = Path(__file__).parent
+        STAGING = base / '.update_staging'
+        # Download to staging
         r = urllib.request.Request(f'{GITHUB_API}/zipball/master', headers={'User-Agent': 'ZeroLive'})
         with urllib.request.urlopen(r, timeout=60) as f:
             z = zipfile.ZipFile(io.BytesIO(f.read()))
-            d = Path(tempfile.mkdtemp())
-            z.extractall(d)
-            src = next(p for p in d.iterdir() if p.is_dir())
-            for item in src.iterdir():
-                if item.name in ('python', 'Zero_live.bat', 'version.txt'): continue
-                dst = base / item.name
-                if item.is_dir(): shutil.copytree(item, dst, dirs_exist_ok=True)
-                else: shutil.copy2(item, dst)
-            shutil.rmtree(d, ignore_errors=True)
-        pip = str(base / 'python' / 'Scripts' / 'pip.exe')
-        subprocess.run([pip if os.path.exists(pip) else sys.executable, 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
-        r2 = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
-        with urllib.request.urlopen(r2, timeout=10) as f:
-            new_sha = json.loads(f.read())['sha']
-        (base / 'version.txt').write_text(new_sha)
-        global CURRENT_VERSION
-        CURRENT_VERSION = new_sha
-        return jsonify({'ok': True, 'message': 'Update applied. Restarting...'})
+            staging = Path(tempfile.mkdtemp())
+            z.extractall(staging)
+            src = next(p for p in staging.iterdir() if p.is_dir())
+            # Save staging path — restart will apply
+            STAGING.write_text(str(src))
+        return jsonify({'ok': True, 'message': 'Update ready. Restart to apply.'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
+
+
+def _apply_staging():
+    """Called at startup to apply a staged update if one exists."""
+    base = Path(__file__).parent
+    sf = base / '.update_staging'
+    if not sf.exists():
+        return
+    try:
+        staging_path = sf.read_text().strip()
+        if not staging_path or not Path(staging_path).exists():
+            sf.unlink(missing_ok=True)
+            return
+        src = Path(staging_path)
+        for item in src.iterdir():
+            if item.name in ('python', 'Zero_live.bat', 'version.txt'):
+                continue
+            dst = base / item.name
+            if item.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst, ignore_errors=True)
+                shutil.copytree(item, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dst)
+        # Update version
+        try:
+            r = urllib.request.Request(f'{GITHUB_API}/commits/master', headers={'User-Agent': 'ZeroLive'})
+            with urllib.request.urlopen(r, timeout=10) as f:
+                new_sha = json.loads(f.read())['sha']
+            (base / 'version.txt').write_text(new_sha)
+        except Exception:
+            pass
+        # pip install
+        pip = base / 'python' / 'Scripts' / 'pip.exe'
+        py = base / 'python' / 'python.exe'
+        if pip.exists():
+            subprocess.run([str(pip), 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
+        elif py.exists():
+            subprocess.run([str(py), '-m', 'pip', 'install', '-r', str(base / 'requirements.txt'), '--quiet'], timeout=60)
+        shutil.rmtree(src, ignore_errors=True)
+        sf.unlink(missing_ok=True)
+        _log.info('Staged update applied')
+    except Exception as e:
+        _log.warning(f'Staging apply failed: {e}')
+        sf.unlink(missing_ok=True)
+
+
+# Apply staged update before anything else
+_apply_staging()
 
 @app.route('/api/update/restart')
 def update_restart():
     def _do_restart():
         time.sleep(1)
-        if _LAUNCH_ARGS:
-            subprocess.Popen(_LAUNCH_ARGS, shell=True)
+        # Zero_live.bat restart loop handles respawn — just exit
+        args = _LAUNCH_ARGS
+        if not args:
+            # Try saved launch args (hypercorn/gunicorn path)
+            la = STATIC_DIR / '.launch_args'
+            if la.exists():
+                try:
+                    args = json.loads(la.read_text())
+                except Exception:
+                    pass
+        if args:
+            subprocess.Popen(args, shell=True)
         os._exit(0)
     threading.Thread(target=_do_restart).start()
     return jsonify({'ok': True, 'message': 'Restarting...'})
@@ -1066,6 +1124,7 @@ def serve_static(filename):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', sys.argv[1] if len(sys.argv) > 1 else 9090))
     _LAUNCH_ARGS = [sys.executable] + sys.argv[:1] + [str(port)]
+    (STATIC_DIR / '.launch_args').write_text(json.dumps(_LAUNCH_ARGS))
     try:
         import webbrowser
         webbrowser.open(f'http://localhost:{port}')

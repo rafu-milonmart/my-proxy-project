@@ -105,7 +105,7 @@
 
   var themeSelect=document.getElementById('themeSelect');
   themeSelect.innerHTML=THEMES.map(function(t){return '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'}).join('');
-  var currentTheme=localStorage.getItem('zl-theme')||'dark';
+  var currentTheme=localStorage.getItem('zl-theme')||'{{ default_theme }}';
   function applyTheme(t){
     document.documentElement.setAttribute('data-theme',t);
     localStorage.setItem('zl-theme',t);
@@ -341,5 +341,6 @@
   });
 })();
 </script>
+<div style="text-align:center;padding:20px;font-size:10px;font-weight:700;letter-spacing:1.5px;color:#888;border-top:1px solid rgba(0,0,0,.08);margin-top:30px">MADE BY RAFIUL HASAN RAFI</div>
 </body>
 </html>

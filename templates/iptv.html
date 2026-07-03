@@ -87,7 +87,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple
 var THEMES=['dark','light','amethyst','emerald','ruby','ocean','cyberpunk','sunset','nord','matrix','midnight'];
 var themeSelect=document.getElementById('themeSelect');
 themeSelect.innerHTML=THEMES.map(function(t){return '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'}).join('');
-var saved=localStorage.getItem('zl-theme')||'dark';
+var saved=localStorage.getItem('zl-theme')||'{{ default_theme }}';
 document.documentElement.setAttribute('data-theme',saved);
 themeSelect.value=saved;
 themeSelect.addEventListener('change',function(){var t=themeSelect.value;document.documentElement.setAttribute('data-theme',t);localStorage.setItem('zl-theme',t)});
@@ -185,5 +185,6 @@ function showToast(m){
   setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove()},300)},2000);
 }
 </script>
+<footer style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:10px;font-weight:700;letter-spacing:1.5px;border-top:1px solid var(--line);margin-top:24px">MADE BY RAFIUL HASAN RAFI</footer>
 </body>
 </html>

@@ -753,6 +753,7 @@ img{max-width:100%;display:block}
 <footer class="footer">
   ZeroLive &mdash; Free sports streaming
   <div class="footer-hint"><a href="/playlist.m3u" download>Download M3U</a> &middot; Open in VLC / IPTV app</div>
+  <div style="margin-top:10px;font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--text-tertiary)">MADE BY RAFIUL HASAN RAFI</div>
 </footer>
 
 <script>
@@ -765,7 +766,7 @@ img{max-width:100%;display:block}
   var THEMES=['dark','light','amethyst','emerald','ruby','ocean','cyberpunk','sunset','nord','matrix','midnight'];
   var themeSelect=document.getElementById('themeSelect');
   themeSelect.innerHTML=THEMES.map(function(t){return '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'}).join('');
-  var savedTheme=localStorage.getItem('zl-theme')||'dark';
+  var savedTheme=localStorage.getItem('zl-theme')||'{{ default_theme }}';
   function applyTheme(t){
     document.documentElement.setAttribute('data-theme',t);
     localStorage.setItem('zl-theme',t);
