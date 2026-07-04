@@ -18,7 +18,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-UPSTREAM = "https://s1.sportzfytvlive.xyz"
+UPSTREAM = "https://live.sportzfy.life"
 DECRYPT_KEY = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
 STATIC_DIR = Path(__file__).parent
 VERSION_FILE = STATIC_DIR / 'version.txt'
@@ -559,8 +559,8 @@ def _validate_channels(to_check, exclude_failures=True):
             if not ok and cid_str not in excluded:
                 excluded.add(cid_str)
                 changed = True
-            elif ok and cid in excluded:
-                excluded.discard(cid)
+            elif ok and cid_str in excluded:
+                excluded.discard(cid_str)
                 changed = True
         if changed:
             _save_mappings(cat_map, excluded)
@@ -1085,7 +1085,10 @@ def _apply_staging():
             return
         src = Path(staging_path)
         for item in src.iterdir():
-            if item.name in ('python', 'Zero_live.bat', 'version.txt'):
+            if item.name in ('python', 'Zero_live.bat', 'version.txt',
+                'combined-playlist.m3u', 'custom_m3u_names.json',
+                'custom_m3u_url.txt', '.update_staging', '.launch_args',
+                'default_theme.txt', 'logs'):
                 continue
             dst = base / item.name
             if item.is_dir():
@@ -1135,7 +1138,7 @@ def update_restart():
                 except Exception:
                     pass
         if args:
-            subprocess.Popen(args, shell=True)
+            subprocess.Popen(args, shell=False)
         os._exit(0)
     threading.Thread(target=_do_restart).start()
     return jsonify({'ok': True, 'message': 'Restarting...'})

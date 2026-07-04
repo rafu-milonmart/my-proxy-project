@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-ZeroLive Interactive Installer — PyQt6 GUI
-Wizard-style: Welcome → Theme → Options → Install → Done
+ZeroLive Interactive Installer - PyQt6 GUI
+Wizard-style: Welcome -> Theme -> Options -> Install -> Done
 """
 
 import sys, os, json, urllib.request, zipfile, io, tempfile, shutil, subprocess, threading, ctypes, math
@@ -541,7 +542,7 @@ class InstallWorker(QThread):
             if repo_root is None:
                 raise RuntimeError("Could not find repo root in zip")
 
-            skip = {"python", "Zero_live.bat", "version.txt", "installer_gui.py", "build_installer.py"}
+            skip = {"python", "version.txt", "installer_gui.py", "build_installer.py", "build", "dist", ".gitignore", ".github"}
             for item in repo_root.iterdir():
                 if item.name in skip:
                     continue
@@ -552,10 +553,6 @@ class InstallWorker(QThread):
                     shutil.copytree(item, dst, dirs_exist_ok=True)
                 else:
                     shutil.copy2(item, dst)
-            # Copy Zero_live.bat before deleting extract_dir
-            src_bat = repo_root / "Zero_live.bat"
-            if src_bat.exists():
-                shutil.copy2(src_bat, base / "Zero_live.bat")
             shutil.rmtree(extract_dir, ignore_errors=True)
             self.log.emit("[OK]  App files copied")
 

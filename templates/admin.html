@@ -124,7 +124,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a0f;color:#e0e0e
           <div class="group">{{ c.group }}</div>
         </div>
         <button class="play-btn" onclick="event.stopPropagation();playChannel('{{ c.id }}', this)" title="Preview">&#9654;</button>
-        <button class="play-btn" style="background:#ef4444;opacity:0.6;font-size:8px;width:18px;height:18px" onclick="event.stopPropagation();toggleExclude({{ c.id }})" title="Exclude">&#10005;</button>
+        <button class="play-btn" style="background:#ef4444;opacity:0.6;font-size:8px;width:18px;height:18px" onclick="event.stopPropagation();toggleExclude('{{ c.id }}')" title="Exclude">&#10005;</button>
         <div class="check"></div>
       </div>
       {% endfor %}

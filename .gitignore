@@ -13,6 +13,7 @@ default_theme.txt
 .update_staging
 .launch_args
 custom_m3u_names.json
+api.json
 build_installer.py
 build/
 *.spec
