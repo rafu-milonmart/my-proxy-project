@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0"
+cd /d "%~dp0."
 title ZeroLive
 setlocal enabledelayedexpansion
 
@@ -10,10 +10,14 @@ set PYTHON=%PYTHON_DIR%\python.exe
 set PIP=%PYTHON_DIR%\Scripts\pip.exe
 
 if not exist "%PYTHON%" (
-    echo [ERROR] Python not found. Run installer.bat first.
+    echo [ERROR] Python not found. Run installer first.
     pause
     exit /b 1
 )
+
+REM Clean stale temp files from previous update attempts
+del "%TEMP%\zero_live_update.zip" >nul 2>&1
+rmdir /S /Q "%TEMP%\zero_live_update" >nul 2>&1
 
 REM Check for updates via GitHub API (no git needed)
 echo Checking for updates...
@@ -33,21 +37,27 @@ if "!LATEST_SHA!"=="!LOCAL_SHA!" goto :UP_TO_DATE
 echo(
 echo [UPDATE] New version found! Downloading...
 powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
-robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%~dp0" /E /XF "Zero_live.bat" /XD "python"
-if !errorlevel! lss 8 (
-    echo !LATEST_SHA! > "!VERSION_FILE!"
-    if exist "%PIP%" (
-        "%PIP%" install -r requirements.txt --quiet
-    ) else (
-        "%PYTHON%" -m pip install -r requirements.txt --quiet
-    )
-    echo Updated to latest version.
-) else (
-    echo [WARN] Update copy failed (robocopy exit !errorlevel!). Skipping.
-)
-del "%TEMP%\zero_live_update.zip" >nul 2>&1
-rmdir /S /Q "%TEMP%\zero_live_update" >nul 2>&1
-goto :AFTER_UPDATE
+REM Write updater to temp and exit — updater copies files safely after we close
+echo @echo off > "%TEMP%\zero_updater.bat"
+echo set APP_DIR=%~dp0 >> "%TEMP%\zero_updater.bat"
+echo timeout /t 3 /nobreak ^>nul >> "%TEMP%\zero_updater.bat"
+echo echo [UPDATE] Applying update... >> "%TEMP%\zero_updater.bat"
+echo robocopy "%%TEMP%%\zero_live_update\my-proxy-project-master" "%%APP_DIR%%" /E /XD "python" >> "%TEMP%\zero_updater.bat"
+echo if not errorlevel 8 ( >> "%TEMP%\zero_updater.bat"
+echo     echo %LATEST_SHA% ^> "%%APP_DIR%%\version.txt" >> "%TEMP%\zero_updater.bat"
+echo     "%%APP_DIR%%\python\python.exe" -m pip install -r "%%APP_DIR%%\requirements.txt" --quiet >> "%TEMP%\zero_updater.bat"
+echo     echo [UPDATE] Update complete. >> "%TEMP%\zero_updater.bat"
+echo ) else ( >> "%TEMP%\zero_updater.bat"
+echo     echo [UPDATE] Copy failed, skipping. >> "%TEMP%\zero_updater.bat"
+echo ) >> "%TEMP%\zero_updater.bat"
+echo del "%%TEMP%%\zero_live_update.zip" ^>nul 2^>^&1 >> "%TEMP%\zero_updater.bat"
+echo rmdir /S /Q "%%TEMP%%\zero_live_update" ^>nul 2^>^&1 >> "%TEMP%\zero_updater.bat"
+echo echo [UPDATE] Restarting ZeroLive... >> "%TEMP%\zero_updater.bat"
+echo start "" "%%APP_DIR%%Zero_live.bat" >> "%TEMP%\zero_updater.bat"
+echo exit >> "%TEMP%\zero_updater.bat"
+
+start "" "%TEMP%\zero_updater.bat"
+exit
 
 :UP_TO_DATE
 echo You are up to date.
