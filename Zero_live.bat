@@ -39,10 +39,10 @@ echo [UPDATE] New version found! Downloading...
 powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
 REM Write updater to temp and exit — updater copies files safely after we close
 echo @echo off > "%TEMP%\zero_updater.bat"
-echo set APP_DIR=%~dp0 >> "%TEMP%\zero_updater.bat"
+echo set "APP_DIR=%~dp0" >> "%TEMP%\zero_updater.bat"
 echo timeout /t 3 /nobreak ^>nul >> "%TEMP%\zero_updater.bat"
 echo echo [UPDATE] Applying update... >> "%TEMP%\zero_updater.bat"
-echo robocopy "%%TEMP%%\zero_live_update\my-proxy-project-master" "%%APP_DIR%%" /E /XD "python" >> "%TEMP%\zero_updater.bat"
+echo robocopy "%%TEMP%%\zero_live_update\my-proxy-project-master" "%%APP_DIR%%" /E /XD "python" /IS /IT >> "%TEMP%\zero_updater.bat"
 echo if not errorlevel 8 ( >> "%TEMP%\zero_updater.bat"
 echo     echo %LATEST_SHA% ^> "%%APP_DIR%%\version.txt" >> "%TEMP%\zero_updater.bat"
 echo     "%%APP_DIR%%\python\python.exe" -m pip install -r "%%APP_DIR%%\requirements.txt" --quiet >> "%TEMP%\zero_updater.bat"
