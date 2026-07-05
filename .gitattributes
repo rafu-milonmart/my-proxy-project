@@ -1,0 +1,11 @@
+dist/ZeroLive_Installer.exe export-ignore
+build_installer.py export-ignore
+installer_gui.py export-ignore
+ZeroLive_Installer.spec export-ignore
+git-push.bat export-ignore
+ai_helper.bat export-ignore
+uninstall.bat export-ignore
+.gitattributes export-ignore
+build/ export-ignore
+__pycache__/ export-ignore
+logs/ export-ignore
