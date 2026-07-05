@@ -1017,8 +1017,10 @@ def proxy_manifest(slug, idx):
             if resp.status_code == 200:
                 body = resp.text
                 if '.mpd' in url and drm_kid and drm_key:
-                    ck = '\n<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
-                    body = re.sub(r'(<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*/>)', r'\1' + ck, body)
+                    body = re.sub(r'<ContentProtection[^>]*/>', '', body)
+                    body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
+                    ck = '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
+                    body = body.replace('</AdaptationSet>', ck + '\n</AdaptationSet>')
                 return Response(body, content_type='application/dash+xml')
         except Exception:
             pass

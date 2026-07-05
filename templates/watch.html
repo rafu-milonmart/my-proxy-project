@@ -1211,6 +1211,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       var drmKey=stream.drm_key||'';
       var isDash=(type==='dash'||(url&&url.includes('.mpd')));
       var isHls=(type==='hls'||(url&&url.includes('.m3u8')));
+      if(isDash&&drmKid&&drmKey)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
       if(type==='hls'||type==='dash')setLiveMode(true);
 
       if(isDash){

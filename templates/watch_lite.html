@@ -60,6 +60,7 @@ function loadStream(idx){
   var type = s.stream_type||'';
   var isDash = type==='dash'||url.includes('.mpd');
   var isHls = type==='hls'||url.includes('.m3u8');
+  if(isDash&&s.drm_kid&&s.drm_key)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
 
   if(isDash){
     if(typeof dashjs==='undefined'){status.textContent='dashjs not loaded';return;}
