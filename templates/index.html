@@ -367,6 +367,8 @@ img{max-width:100%;display:block}
   from{opacity:0;transform:translateY(20px)}
   to{opacity:1;transform:translateY(0)}
 }
+.event-card-link{display:block;text-decoration:none;color:inherit;cursor:pointer}
+.event-card-link:hover{outline:none}
 .event-card:nth-child(1){animation-delay:.05s}
 .event-card:nth-child(2){animation-delay:.1s}
 .event-card:nth-child(3){animation-delay:.15s}
@@ -871,7 +873,8 @@ img{max-width:100%;display:block}
       var soon=s.type==='soon';
       var cls=live?'live':soon?'starting-soon':'upcoming';
       var icon=live?'▶':soon?'⏳':'⌛';
-      return '<a class="event-card '+cls+'" href="/watch/'+encodeURIComponent(slug)+'" style="animation-delay:0s">'+
+      return '<div class="event-card '+cls+'" style="animation-delay:0s">'+
+        '<a class="event-card-link" href="/watch/'+encodeURIComponent(slug)+'">'+
         '<div class="glow-bar"></div>'+
         '<div class="event-top">'+
           '<span class="event-sport" style="background:'+color+'14;color:'+color+'">'+E(e.sport||'Sports')+'</span>'+
@@ -890,16 +893,16 @@ img{max-width:100%;display:block}
               ? '<img src="'+E(e.team_b_logo)+'" alt="" class="team-logo" data-init="'+ESC_INIT(e.team_b_name)+'" onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'team-fallback\',textContent:this.dataset.init}))">'
               : '<div class="team-fallback">'+ESC_INIT(e.team_b_name)+'</div>')+
           '</div><div class="team-name">'+E(e.team_b_name)+'</div></div>'+
-        '</div>'+
+        '</div></a>'+
         '<div class="event-bottom">'+
           '<span style="display:flex;align-items:center;gap:6px">'+
             '<span class="event-cta">'+icon+' '+(live?'Watch Live':soon?'View Stream':'View Stream')+'</span>'+
-            '<span class="btn-vlc" data-vlc-slug="'+E(slug)+'" onclick="event.stopPropagation();openInVLC(this.dataset.vlcSlug)" title="Download M3U">VLC</span>'+
-            '<span class="btn-copym3u" data-copy-slug="'+E(slug)+'" onclick="event.stopPropagation();copyM3ULink(this.dataset.copySlug)" title="Copy M3U Link">M3U</span>'+
-            '<span class="btn-customm3u'+(window._customNames&&window._customNames[E(slug)]?' active':'')+'" data-slug="'+E(slug)+'" onclick="event.stopPropagation();addCustomM3U(this.dataset.slug,this)" title="Name this M3U">+M3U</span>'+
+            '<span class="btn-vlc" data-vlc-slug="'+E(slug)+'" onclick="openInVLC(this.dataset.vlcSlug)" title="Download M3U">VLC</span>'+
+            '<span class="btn-copym3u" data-copy-slug="'+E(slug)+'" onclick="copyM3ULink(this.dataset.copySlug)" title="Copy M3U Link">M3U</span>'+
+            '<span class="btn-customm3u'+(window._customNames&&window._customNames[E(slug)]?' active':'')+'" data-slug="'+E(slug)+'" onclick="addCustomM3U(this.dataset.slug,this)" title="Name this M3U">+M3U</span>'+
           '</span>'+
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-tertiary);opacity:.35"><path d="M9 18l6-6-6-6"/></svg>'+
-        '</div></a>';
+        '</div></div>';
     }).join('');
     clearTimeout(window._timer);
     window._timer=setTimeout(function(){render();},30000);
