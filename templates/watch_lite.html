@@ -60,16 +60,13 @@ function loadStream(idx){
   var type = s.stream_type||'';
   var isDash = type==='dash'||url.includes('.mpd');
   var isHls = type==='hls'||url.includes('.m3u8');
-  if(isDash)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+  if(isDash)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx;
 
   if(isDash){
     if(typeof dashjs==='undefined'){status.textContent='dashjs not loaded';return;}
     var dp = dashjs.MediaPlayer().create();
     dp.updateSettings({
-      streaming:{buffer:{bufferToKeep:60,bufferMax:120,bufferPruneInterval:10,stableBufferSize:60},
-      abr:{fastSwitchEnabled:true,abrFetchThroughputCalculationMode:1,useDefaultABRRules:true},
-      liveCatchup:{enableLowLatency:true,playbackRateMin:0.8,playbackRateMax:1.2},
-      scheduleWhilePaused:false,calcSegmentAvailabilityRangeFromTimeline:false},
+      streaming:{buffer:{bufferToKeep:60,maxBufferTime:120,bufferTimeAtTopQuality:60,stableBufferTime:60},scheduleWhilePaused:false},
     });
     if(s.drm_kid && s.drm_key){
       var ck={};ck[s.drm_kid.toLowerCase()]=s.drm_key.toLowerCase();
