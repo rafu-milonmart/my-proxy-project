@@ -37,27 +37,19 @@ if "!LATEST_SHA!"=="!LOCAL_SHA!" goto :UP_TO_DATE
 echo(
 echo [UPDATE] New version found! Downloading...
 powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
-REM Write updater to temp and exit — updater copies files safely after we close
-echo @echo off > "%TEMP%\zero_updater.bat"
-echo set "APP_DIR=%~dp0" >> "%TEMP%\zero_updater.bat"
-echo timeout /t 3 /nobreak ^>nul >> "%TEMP%\zero_updater.bat"
-echo echo [UPDATE] Applying update... >> "%TEMP%\zero_updater.bat"
-echo robocopy "%%TEMP%%\zero_live_update\my-proxy-project-master" "%%APP_DIR%%" /E /XD "python" /XF "version.txt" /IS /IT >> "%TEMP%\zero_updater.bat"
-echo if not errorlevel 8 ( >> "%TEMP%\zero_updater.bat"
-echo     ^>"%%APP_DIR%%\version.txt" echo %LATEST_SHA% >> "%TEMP%\zero_updater.bat"
-echo     "%%APP_DIR%%\python\python.exe" -m pip install -r "%%APP_DIR%%\requirements.txt" --quiet >> "%TEMP%\zero_updater.bat"
-echo     echo [UPDATE] Update complete. >> "%TEMP%\zero_updater.bat"
-echo ) else ( >> "%TEMP%\zero_updater.bat"
-echo     echo [UPDATE] Copy failed, skipping. >> "%TEMP%\zero_updater.bat"
-echo ) >> "%TEMP%\zero_updater.bat"
-echo del "%%TEMP%%\zero_live_update.zip" ^>nul 2^>^&1 >> "%TEMP%\zero_updater.bat"
-echo rmdir /S /Q "%%TEMP%%\zero_live_update" ^>nul 2^>^&1 >> "%TEMP%\zero_updater.bat"
-echo echo [UPDATE] Restarting ZeroLive... >> "%TEMP%\zero_updater.bat"
-echo start "" "%%APP_DIR%%Zero_live.bat" >> "%TEMP%\zero_updater.bat"
-echo exit >> "%TEMP%\zero_updater.bat"
-
-start "" "%TEMP%\zero_updater.bat"
-exit
+echo [UPDATE] Applying update...
+robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%~dp0" /E /XD "python" /XF "version.txt" /IS /IT
+if not errorlevel 8 (
+    >"%~dp0version.txt" echo %LATEST_SHA%
+    "%~dp0python\python.exe" -m pip install -r "%~dp0requirements.txt" --quiet
+    echo [UPDATE] Update complete.
+) else (
+    echo [UPDATE] Copy failed, skipping.
+)
+del "%TEMP%\zero_live_update.zip" >nul 2>&1
+rmdir /S /Q "%TEMP%\zero_live_update" >nul 2>&1
+echo [UPDATE] Restarting...
+goto :AFTER_UPDATE
 
 :UP_TO_DATE
 echo You are up to date.
