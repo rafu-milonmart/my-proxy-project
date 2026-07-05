@@ -79,6 +79,7 @@ _media_headers = {
 # ---------------------------------------------------------------------------
 _ev_cache = {}       # key -> (ts, data)
 _pb_cache = {}       # slug -> (ts, streams_list)
+_manifest_cache = {} # (slug, idx) -> (ts, body)
 _m3u_cache = {}
 _DECRYPT_KEY_CACHE = {}
 
@@ -1005,6 +1006,11 @@ def proxy_dash_seg(slug, idx, seg_path):
 
 @app.route('/proxy/manifest/<slug>/<int:idx>')
 def proxy_manifest(slug, idx):
+    key = (slug, idx)
+    now = time.time()
+    hit = _manifest_cache.get(key)
+    if hit and now - hit[0] < 30:
+        return Response(hit[1], content_type='application/dash+xml')
     streams = _pb_cached(slug)
     if not streams or idx >= len(streams):
         return jsonify({"error": "Not found"}), 404
@@ -1021,6 +1027,7 @@ def proxy_manifest(slug, idx):
                     body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
                     ck = '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
                     body = body.replace('</AdaptationSet>', ck + '\n</AdaptationSet>')
+                _manifest_cache[key] = (time.time(), body)
                 return Response(body, content_type='application/dash+xml')
         except Exception:
             pass

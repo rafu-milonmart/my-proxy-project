@@ -1211,13 +1211,19 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       var drmKey=stream.drm_key||'';
       var isDash=(type==='dash'||(url&&url.includes('.mpd')));
       var isHls=(type==='hls'||(url&&url.includes('.m3u8')));
-      if(isDash&&drmKid&&drmKey)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+      if(isDash)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
       if(type==='hls'||type==='dash')setLiveMode(true);
 
       if(isDash){
         if(typeof dashjs==='undefined'){showPlaceholder('Dash.js failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
         var dashPlayer=dashjs.MediaPlayer().create();
+        dashPlayer.updateSettings({
+          streaming:{buffer:{bufferToKeep:60,bufferMax:120,bufferPruneInterval:10,stableBufferSize:60},
+          abr:{fastSwitchEnabled:true,abrFetchThroughputCalculationMode:1,useDefaultABRRules:true},
+          liveCatchup:{enableLowLatency:true,playbackRateMin:0.8,playbackRateMax:1.2},
+          scheduleWhilePaused:false,calcSegmentAvailabilityRangeFromTimeline:false},
+        });
         if(drmKid && drmKey){
           var ck={};ck[drmKid.toLowerCase()]=drmKey.toLowerCase();
           dashPlayer.setProtectionData({'org.w3.clearkey':{'clearkeys':ck}});
