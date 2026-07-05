@@ -451,6 +451,9 @@ img{max-width:100%;display:block}
 }
 .btn-customm3u:hover{color:var(--accent);border-color:var(--accent)}
 .btn-customm3u.active{background:rgba(121,54,247,.2);color:var(--accent);border-color:var(--accent)}
+.iptv-header-btn:hover{background:#a855f7!important;color:#fff!important;border-color:#a855f7!important}
+.iptv-list-item:hover{background:var(--bg-hover)!important}
+.iptv-list-item.active{background:rgba(168,85,247,.12)!important}
 .btn-copym3u{
 
 
@@ -617,7 +620,6 @@ img{max-width:100%;display:block}
     </a>
     <div class="mode-tabs">
       <a href="/" class="mode-tab active" data-mode="1">ZL1</a>
-      <a href="/iptv" class="mode-tab" data-mode="2">ZL2</a>
     </div>
     <div class="search-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -628,6 +630,7 @@ img{max-width:100%;display:block}
       <button class="btn-icon" id="refreshBtn" title="Refresh"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>
       <select id="themeSelect" class="theme-picker" title="Theme"></select>
       <a href="/playlist.m3u" class="btn-m3u" download><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 20 8-12-8-4-4 8z"/><path d="M14 20h8"/><path d="M18 16v4"/></svg>M3U</a>
+      <button class="btn-m3u iptv-header-btn" id="iptvIndexBtn" title="Assign IPTV to Events" style="background:rgba(168,85,247,.12)!important;border-color:rgba(168,85,247,.25)!important;color:var(--text)!important">IPTV</button>
       <a href="/" class="btn-m3u" style="background:transparent;border-color:var(--text-tertiary);color:var(--text-tertiary);font-size:10px">Lite</a>
     </div>
   </div>
@@ -705,6 +708,36 @@ img{max-width:100%;display:block}
         <button class="modal-btn" id="customM3UDelete" style="display:none">Remove</button>
       </div>
       <div id="customM3UList" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;font-size:12px;color:var(--text-secondary);max-height:150px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="iptvIndexModal">
+  <div class="modal-box" style="max-width:550px">
+    <div class="modal-header">
+      <span>IPTV Channel Assignment</span>
+      <button id="iptvIndexClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Search Events</label>
+        <input id="iptvIndexSearch" type="text" placeholder="Type event name or slug..." style="width:100%;padding:8px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none;font-family:inherit">
+      </div>
+      <div class="field">
+        <label>Select an event, then choose an IPTV channel:</label>
+        <div style="display:flex;gap:8px">
+          <select id="iptvIndexEventSelect" style="flex:1;padding:8px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:12px;outline:none;font-family:inherit">
+            <option value="">— Select Event —</option>
+          </select>
+          <button class="modal-btn" id="iptvIndexUnassign" style="display:none">Remove</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Available IPTV Channels</label>
+        <input id="iptvIndexChanSearch" type="text" placeholder="Filter channels..." style="width:100%;padding:8px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none;font-family:inherit;margin-bottom:6px">
+        <div id="iptvIndexChannelList" style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg-card);padding:4px"></div>
+      </div>
+      <div id="iptvIndexStatus" style="font-size:11px;color:var(--text-tertiary);margin-top:6px"></div>
     </div>
   </div>
 </div>
@@ -1173,6 +1206,135 @@ img{max-width:100%;display:block}
       updateApplyBtn.disabled=false;
       settingsUpdates.textContent='Error applying update.';
     });
+  });
+
+  /* ---- IPTV Assignment Modal (Index Page) ---- */
+  var iptvModal=document.getElementById('iptvIndexModal');
+  var iptvEventSelect=document.getElementById('iptvIndexEventSelect');
+  var iptvChanSearch=document.getElementById('iptvIndexChanSearch');
+  var iptvChannelList=document.getElementById('iptvIndexChannelList');
+  var iptvStatus=document.getElementById('iptvIndexStatus');
+  var iptvUnassign=document.getElementById('iptvIndexUnassign');
+  var iptvSearchInput=document.getElementById('iptvIndexSearch');
+  var allIptvChans=[];
+  var iptvLinks={};
+
+  function loadIptvAssignData(){
+    Promise.all([
+      fetch('/api/iptv-channels').then(function(r){return r.json()}),
+      fetch('/api/event-channels').then(function(r){return r.json()}),
+      fetch('/api/upstream/events',{cache:'no-store'}).then(function(r){return r.json()})
+    ]).then(function(results){
+      var chData=results[0],evData=results[1],eventData=results[2];
+      if(chData.ok)allIptvChans=chData.channels||[];
+      if(evData.ok)iptvLinks=evData.links||{};
+      var evs=eventData&&Array.isArray(eventData.events)?eventData.events:(Array.isArray(eventData)?eventData:[]);
+      iptvEventSelect.innerHTML='<option value="">— Select Event —</option>';
+      evs.forEach(function(e){
+        var slug=e.enc_parent||e.parent||e.id;
+        if(!slug)return;
+        var label=(e.team_a_name||'?')+' vs '+(e.team_b_name||'?')+' — '+(e.sport||'Sports');
+        var linked=iptvLinks[slug];
+        var opt=document.createElement('option');
+        opt.value=slug;
+        opt.textContent=label+(linked?' [IPTV ASSIGNED]':'');
+        iptvEventSelect.appendChild(opt);
+      });
+      iptvStatus.textContent=allIptvChans.length+' channels · '+(evs.length||0)+' events';
+      renderIptvIndexList();
+    })['catch'](function(){
+      iptvStatus.textContent='Failed to load data';
+    });
+  }
+
+  function renderIptvIndexList(){
+    var slug=iptvEventSelect.value;
+    var q=iptvChanSearch.value.trim().toLowerCase();
+    var filtered=q?allIptvChans.filter(function(c){
+      return (c.name||'').toLowerCase().includes(q)||(c.group||'').toLowerCase().includes(q);
+    }):allIptvChans;
+    var linkedId=slug?iptvLinks[slug]:null;
+    if(!filtered.length){
+      iptvChannelList.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px">No channels</div>';
+      iptvUnassign.style.display=linkedId?'':'none';
+      return;
+    }
+    iptvChannelList.innerHTML=filtered.map(function(c){
+      var active=c.id===linkedId;
+      return '<button class="iptv-list-item'+(active?' active':'')+'" data-id="'+c.id+'" data-slug="'+E(slug||'')+'" style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:none;background:'+(active?'var(--accent-dim)':'transparent')+';color:'+(active?'var(--accent)':'var(--text)')+';border-radius:6px;cursor:pointer;font-size:12px;text-align:left;transition:all .1s;margin:1px 0" '+
+        'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background='+(active?"'var(--accent-dim)'":"'transparent'")+'">'+
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(c.name||'?')+'</span>'+
+        '<span style="font-size:10px;color:var(--text-tertiary);flex-shrink:0">'+(c.group||'').slice(0,15)+'</span>'+
+        (active?'<span style="color:var(--accent);font-size:14px">✓</span>':'')+
+        '</button>';
+    }).join('');
+    iptvUnassign.style.display=linkedId?'':'none';
+  }
+
+  iptvEventSelect.addEventListener('change',renderIptvIndexList);
+  iptvChanSearch.addEventListener('input',renderIptvIndexList);
+  iptvSearchInput.addEventListener('input',function(){
+    var q=this.value.toLowerCase();
+    Array.from(iptvEventSelect.options).forEach(function(o){
+      if(!o.value)return;
+      o.hidden=q&&!o.textContent.toLowerCase().includes(q);
+    });
+  });
+
+  iptvChannelList.addEventListener('click',function(e){
+    var item=e.target.closest('.iptv-list-item');
+    if(!item)return;
+    var slug=iptvEventSelect.value;
+    if(!slug){showToast('Select an event first');return;}
+    var channelId=item.dataset.id;
+    var linkedId=iptvLinks[slug];
+    var method=linkedId===channelId?'DELETE':'POST';
+    var body=method==='POST'?JSON.stringify({slug:slug,channel_id:channelId}):JSON.stringify({slug:slug});
+    fetch('/api/event-channel',{method:method,headers:{'Content-Type':'application/json'},body:body})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+          if(method==='POST'){iptvLinks[slug]=channelId;}
+          else{delete iptvLinks[slug];}
+          showToast(method==='POST'?'IPTV assigned!':'Assignment removed','✓');
+          renderIptvIndexList();
+          // Update event select labels
+          Array.from(iptvEventSelect.options).forEach(function(o){
+            if(o.value===slug){
+              var base=o.textContent.replace(/\s*\[IPTV ASSIGNED\]/g,'');
+              o.textContent=base+(iptvLinks[slug]?' [IPTV ASSIGNED]':'');
+            }
+          });
+        }else{showToast('Error: '+(d.error||'Failed'),'✕');}
+      })['catch'](function(){showToast('Failed to save','✕');});
+  });
+
+  iptvUnassign.addEventListener('click',function(){
+    var slug=iptvEventSelect.value;
+    if(!slug)return;
+    fetch('/api/event-channel',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+          delete iptvLinks[slug];
+          showToast('Assignment removed','✓');
+          renderIptvIndexList();
+          Array.from(iptvEventSelect.options).forEach(function(o){
+            if(o.value===slug)o.textContent=o.textContent.replace(/\s*\[IPTV ASSIGNED\]/g,'');
+          });
+        }
+      })['catch'](function(){});
+  });
+
+  document.getElementById('iptvIndexBtn').addEventListener('click',function(){
+    iptvModal.classList.add('open');
+    iptvSearchInput.value='';
+    iptvChanSearch.value='';
+    loadIptvAssignData();
+  });
+  document.getElementById('iptvIndexClose').addEventListener('click',function(){
+    iptvModal.classList.remove('open');
+  });
+  iptvModal.addEventListener('click',function(e){
+    if(e.target===iptvModal)iptvModal.classList.remove('open');
   });
 })();
 </script>
