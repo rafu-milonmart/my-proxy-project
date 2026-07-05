@@ -26,7 +26,7 @@ video{width:100%;display:block;max-height:90vh}
   <div class="info">
     <span>{{ event.team_a_name if event else slug }} vs {{ event.team_b_name if event else 'Stream' }}</span>
     {% if event and event.league %} &middot; {{ event.league }}{% endif %}
-    &middot; <a href="/faster">Back</a>
+    &middot; <a href="/">Back</a>
   </div>
   <video id="video" autoplay playsinline preload="auto" controls></video>
   <div class="controls" id="controls"></div>
@@ -113,12 +113,17 @@ function renderButtons(){
 renderButtons();
 
 /* ---- IPTV Mapped Channels ---- */
-fetch('/api/iptv/mappings?sport='+encodeURIComponent('{{ sport|e }}')).then(function(r){return r.json();}).then(function(data){
-  if(!data.ok||!data.channels||data.channels.length===0)return;
-  data.channels.forEach(function(ch,i){
+fetch('/api/event-channels').then(function(r){return r.json();}).then(function(evData){
+  if(!evData.ok||!evData.links)return;
+  var channelId=evData.links[slug];
+  if(!channelId)return;
+  fetch('/api/iptv-channels').then(function(r){return r.json();}).then(function(chData){
+    if(!chData.ok||!chData.channels||chData.channels.length===0)return;
+    var ch=chData.channels.find(function(c){return c.id==channelId;});
+    if(!ch)return;
     streams.push({stream_url:ch.url,stream_type:'hls',_iptv:true,_iptv_id:ch.id,name:ch.name,drm_kid:'',drm_key:''});
-  });
-  renderButtons();
+    renderButtons();
+  })['catch'](function(){});
 })['catch'](function(){});
 </script>
 <div style="text-align:center;padding:16px;font-size:9px;font-weight:700;letter-spacing:1.5px;color:#666;border-top:1px solid rgba(255,255,255,.08);margin-top:20px">MADE BY RAFIUL HASAN RAFI</div>

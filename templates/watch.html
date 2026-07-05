@@ -1293,21 +1293,24 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var iptvServerRow=document.getElementById('iptvServerRow');
   var iptvSectionLabel=document.getElementById('iptvSectionLabel');
   (function(){
-    fetch('/api/iptv/mappings?sport='+encodeURIComponent(eventSport)).then(function(r){return r.json();}).then(function(data){
-      if(!data.ok||!data.channels||data.channels.length===0)return;
-      var chs=data.channels;
-      chs.forEach(function(ch,i){
-        var idx=(streams||[]).length+i;
+    fetch('/api/event-channels').then(function(r){return r.json();}).then(function(evData){
+      if(!evData.ok||!evData.links)return;
+      var channelId=evData.links[slug];
+      if(!channelId)return;
+      fetch('/api/iptv-channels').then(function(r){return r.json();}).then(function(chData){
+        if(!chData.ok||!chData.channels||chData.channels.length===0)return;
+        var ch=chData.channels.find(function(c){return c.id==channelId;});
+        if(!ch)return;
+        var idx=(streams||[]).length;
         var btn=document.createElement('button');
         btn.className='srv-btn iptv-btn';
         btn.dataset.idx=idx;
         btn.textContent=ch.name;
         iptvServerRow.appendChild(btn);
-        // append to streams array as fake stream object
         streams.push({stream_url:ch.url,stream_type:'hls',drm_kid:'',drm_key:'',_iptv:true,_iptv_id:ch.id});
-      });
-      iptvServerRow.style.display='';
-      iptvSectionLabel.style.display='';
+        iptvServerRow.style.display='';
+        iptvSectionLabel.style.display='';
+      })['catch'](function(){});
     })['catch'](function(){});
   })();
 
