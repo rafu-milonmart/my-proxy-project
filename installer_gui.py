@@ -617,16 +617,16 @@ class InstallWorker(QThread):
             readme = base / "readme.txt"
             if not readme.exists():
                 readme.write_text(
-                    "╔══════════════════════════════════════╗\n"
-                    "║    ZeroLive – Free Sports Streaming  ║\n"
-                    "╚══════════════════════════════════════╝\n\n"
+                    "+======================================+\n"
+                    "|    ZeroLive - Free Sports Streaming  |\n"
+                    "+======================================+\n\n"
                     "*  Double-click 'ZeroLive' on desktop to start\n"
                     "*  Opens at http://127.0.0.1:9090\n\n"
                     "CONTROLS:\n"
-                    "  Space  – Play/Pause        F  – Fullscreen\n"
-                    "  M      – Mute/Unmute        I  – Stream Info\n"
-                    "  S      – Speed               ←→ – Seek\n"
-                    "  ↑↓     – Volume\n\n"
+                    "  Space  - Play/Pause        F  - Fullscreen\n"
+                    "  M      - Mute/Unmute        I  - Stream Info\n"
+                    "  S      - Speed              <-> - Seek\n"
+                    "  ^ v    - Volume\n\n"
                     "*  Double-click 'ZeroLive Uninstall' to remove\n"
                 )
                 self.log.emit("[OK]  README created")
@@ -653,6 +653,7 @@ class InstallerWindow(QWidget):
         self._colors = dict(THEMES[DEFAULT_THEME])
         self._worker = None
         self._page = 0  # 0=welcome, 1=theme, 2=options, 3=install, 4=done
+        self._install_path = ""
         self._build_ui()
         self._apply_root_style()
 
@@ -1093,7 +1094,8 @@ class InstallerWindow(QWidget):
             self._quit_app()
 
     def _start_install(self):
-        dest = Path(self._path_picker.path)
+        self._install_path = self._path_picker.path
+        dest = Path(self._install_path)
         if not dest:
             QMessageBox.warning(self, "Path Required", "Please select an install directory.")
             return
@@ -1124,7 +1126,7 @@ class InstallerWindow(QWidget):
         self._show_done_page(success, msg)
 
     def _launch(self):
-        bat = Path(self._path_picker.path) / "Zero_live.bat"
+        bat = Path(self._install_path) / "Zero_live.bat"
         if bat.exists():
             subprocess.Popen(
                 ['cmd.exe', '/c', 'start', '', str(bat)],
@@ -1139,7 +1141,7 @@ class InstallerWindow(QWidget):
         QApplication.quit()
 
     def _open_folder(self):
-        os.startfile(self._path_picker.path)
+        os.startfile(self._install_path)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

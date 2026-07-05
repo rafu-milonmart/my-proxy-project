@@ -20,7 +20,8 @@ echo Checking for updates...
 set VERSION_FILE=%~dp0version.txt
 set GITHUB_API=https://api.github.com/repos/rafu-milonmart/my-proxy-project/commits/master
 
-for /f %%a in ('powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing | ConvertFrom-Json; Write-Output $r.sha } catch { Write-Output '__FAIL__' }"') do set LATEST_SHA=%%a
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing; ($r.Content | ConvertFrom-Json).sha } catch { Write-Output '__FAIL__' }" > "%TEMP%\zero_live_sha.txt"
+set /p LATEST_SHA=<"%TEMP%\zero_live_sha.txt"
 
 if not "!LATEST_SHA!"=="__FAIL__" if not "!LATEST_SHA!"=="" (
     set LOCAL_SHA=
