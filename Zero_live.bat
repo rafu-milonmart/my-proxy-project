@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0."
+cd /d "%~dp0"
 title ZeroLive
 setlocal enabledelayedexpansion
 
@@ -38,7 +38,8 @@ echo(
 echo [UPDATE] New version found! Downloading...
 powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
 echo [UPDATE] Applying update...
-robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%~dp0." /E /XD "python" /XF "version.txt" /IS /IT
+set "PROJ_DIR=%~dp0"
+robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%PROJ_DIR%" /E /XD "python" /XF "version.txt" /IS /IT
 if not errorlevel 8 (
     >"%~dp0version.txt" echo %LATEST_SHA%
     "%~dp0python\python.exe" -m pip install -r "%~dp0requirements.txt" --quiet
