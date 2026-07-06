@@ -467,10 +467,10 @@ def proxy_manifest(slug, idx):
             with urllib.request.urlopen(req, timeout=10) as r:
                 body = r.read().decode('utf-8', errors='replace')
             if '.mpd' in url:
-                body = re.sub(r'<ContentProtection[^>]*/>', '', body)
-                body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
-                # Inject ClearKey ContentProtection — dashjs needs at least
-                # one ContentProtection element to activate its DRM path.
+                # Remove DRM-scheme ContentProtection (Widevine/PlayReady),
+                # but KEEP urn:mpeg:dash:mp4protection:2011 (CENC signal).
+                body = re.sub(r'<ContentProtection schemeIdUri="urn:uuid:[^"]*"[^>]*/>', '', body)
+                body = re.sub(r'<ContentProtection schemeIdUri="urn:uuid:[^"]*"[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
                 if drm_kid and drm_key:
                     body = body.replace(
                         '</AdaptationSet>',

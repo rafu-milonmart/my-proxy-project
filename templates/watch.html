@@ -1228,7 +1228,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(typeof shaka==='undefined'){showPlaceholder('Shaka Player failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
         var proxyUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
-        var shakaPlayer=new shaka.Player(video);
+        var shakaPlayer=new shaka.Player();
+        player=shakaPlayer;
         if(drmKid && drmKey){
           var kid=normHex(drmKid),key=normHex(drmKey);
           var ck={};ck[kid]=key;
@@ -1239,8 +1240,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           if(fallbackTried[activeIdx+1])return;
           tryNext(activeIdx);
         });
-        player=shakaPlayer;
-        shakaPlayer.load(proxyUrl).then(function(){
+        shakaPlayer.attach(video).then(function(){
+          return shakaPlayer.load(proxyUrl);
+        }).then(function(){
           var tracks=shakaPlayer.getVariantTracks()||[];
           if(tracks.length){
             buildQualityMenu(tracks);
@@ -1248,7 +1250,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           }
           startPlay();
         })['catch'](function(err){
-          L('Shaka load error: '+(err.message||err));
+          L('Shaka init error: '+(err.message||err));
           if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
         });
       }else if(isHls){
@@ -1256,7 +1258,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         if(Hls.isSupported()){
           showVideo();
           var hlsProxy='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
-          var hlsTriedProxy=false;
+          var hlsTriedDirect=false;
           var hls=new Hls({
             enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
             backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1
@@ -1269,12 +1271,12 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           hls.on(Hls.Events.ERROR,function(e,data){
             if(data.fatal){
               if(fallbackTried[activeIdx+1])return;
-              if(!hlsTriedProxy){hlsTriedProxy=true;setTimeout(function(){hls.loadSource(hlsProxy);},100);return;}
+              if(!hlsTriedDirect){hlsTriedDirect=true;setTimeout(function(){hls.loadSource(rawUrl);},100);return;}
               tryNext(activeIdx);
             }
           });
           hls.attachMedia(video);
-          hls.loadSource(rawUrl);
+          hls.loadSource(hlsProxy);
           player=hls;
           startPlay();
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
