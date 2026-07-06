@@ -480,6 +480,7 @@ def _validate_all_channels(timeout=6):
 
 # Retry dead channels periodically
 def _retry_dead_loop():
+    global _excluded_iptv
     while True:
         time.sleep(120)
         try:
