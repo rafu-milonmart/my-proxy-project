@@ -887,18 +887,27 @@ def proxy_hls(slug, idx):
     p = urlparse(target)
     if not p.netloc:
         target = urljoin(s['stream_url'][:s['stream_url'].rfind('/') + 1], target)
-    http = _media_sess()
-    for attempt in range(2):
+    ref = s.get('referer', '')
+    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    def _fetch(url):
+        req = urllib.request.Request(url, headers={
+            'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
+        })
+        if ref: req.add_header('Referer', ref)
         try:
-            resp = http.get(target)
-            if resp.status_code == 200:
-                text = resp.text
-                if '.m3u8' in target or text.startswith('#EXT'):
-                    return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
-                return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-        except Exception:
-            if attempt == 0:
-                time.sleep(1)
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.status, r.read(), r.headers.get('Content-Type', '')
+        except Exception as e:
+            return 0, b'', str(e)
+    for attempt in range(3):
+        code, body, ct = _fetch(target)
+        if code == 200:
+            text = body.decode('utf-8', errors='replace')
+            if '.m3u8' in target or text.startswith('#EXT'):
+                return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
+            return Response(body, content_type=ct or 'application/octet-stream')
+        if attempt < 2:
+            time.sleep(1.5)
     return jsonify({"error": "Upstream failed"}), 502
 
 @app.route('/proxy/dashseg/<slug>/<int:idx>/<path:seg_path>')
@@ -906,22 +915,23 @@ def proxy_dash_seg(slug, idx, seg_path):
     streams = _pb_cached(slug)
     if not streams or idx >= len(streams):
         return jsonify({"error": "Not found"}), 404
-    base_dir = streams[idx]['stream_url']
+    s = streams[idx]
+    base_dir = s['stream_url']
     base_dir = base_dir[:base_dir.rfind('/') + 1]
     target = urljoin(base_dir, seg_path)
     qs = request.query_string
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
-    http = _media_sess()
-    for _ in range(2):
+    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    for _ in range(3):
         try:
-            resp = http.get(target)
-            if resp.status_code in (200, 206):
-                return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-            if resp.status_code in (301, 302) and resp.headers.get('location'):
-                resp = http.get(resp.headers['location'])
-                if resp.status_code in (200, 206):
-                    return Response(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+            req = urllib.request.Request(target, headers={
+                'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
+            })
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read()
+                ct = r.headers.get('Content-Type', 'application/octet-stream')
+                return Response(body, content_type=ct)
         except Exception:
             time.sleep(0.5)
     return jsonify({"error": "Segment failed"}), 502
@@ -939,19 +949,22 @@ def proxy_manifest(slug, idx):
         return jsonify({"error": "Not found"}), 404
     s = streams[idx]
     url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
-    http = _media_sess()
+    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     for attempt in range(3):
         try:
-            resp = http.get(url, headers={'Origin': UPSTREAM, 'Accept': '*/*', 'X-Requested-With': 'lsp', 'X-LSP-Enc': '1'})
-            if resp.status_code == 200:
-                body = resp.text
-                if '.mpd' in url and drm_kid and drm_key:
-                    body = re.sub(r'<ContentProtection[^>]*/>', '', body)
-                    body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
+            req = urllib.request.Request(url, headers={
+                'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
+            })
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read().decode('utf-8', errors='replace')
+            if '.mpd' in url:
+                body = re.sub(r'<ContentProtection[^>]*/>', '', body)
+                body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
+                if drm_kid and drm_key:
                     ck = '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
                     body = body.replace('</AdaptationSet>', ck + '\n</AdaptationSet>')
-                _manifest_cache[key] = (time.time(), body)
-                return Response(body, content_type='application/dash+xml')
+            _manifest_cache[key] = (time.time(), body)
+            return Response(body, content_type='application/dash+xml')
         except Exception:
             pass
         if attempt < 2:

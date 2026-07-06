@@ -1278,8 +1278,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           if(dashPlayer.isDynamic&&dashPlayer.isDynamic())setLiveMode(true);
         });
         dashPlayer.on(dashjs.MediaPlayer.events.ERROR,function(e){
-          var fatalTypes=['manifestError','manifestErrorParser','cces','keysystemError'];
-          if(e&&e.error&&fatalTypes.indexOf(e.error)===-1){L('Dash non-fatal error: '+e.error);return;}
+          L('Dash error: '+(e.error||'unknown')+' event='+e.type);
           if(fallbackTried[activeIdx+1])return;
           tryNext(activeIdx);
         });
@@ -1350,14 +1349,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     iptvServerRow.style.display='';
     iptvSectionLabel.style.display='';
   }
-
-  /* ---- IPTV server row click ---- */
-  iptvServerRow.addEventListener('click',function(e){
-    var btn=e.target.closest('.srv-btn');
-    if(!btn)return;
-    var idx=parseInt(btn.dataset.idx);
-    if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
-  });
 
   /* ---- IPTV server row click ---- */
   iptvServerRow.addEventListener('click',function(e){
