@@ -351,6 +351,7 @@ def _refresh_iptv_loop():
         time.sleep(3600)
         try:
             _load_iptv()
+            _refresh_sport_index()
             with _iptv_lock:
                 _log.info('M3U refreshed: %d channels', len(_IPTV_CHANNELS))
         except Exception:
@@ -515,26 +516,36 @@ threading.Thread(target=_retry_dead_loop, daemon=True).start()
 # ---------------------------------------------------------------------------
 # Event-channel linking API
 # ---------------------------------------------------------------------------
-@app.route('/api/event-channels')
-def api_event_channels():
-    links = _read_event_links()
-    return jsonify({'ok': True, 'links': links})
+@app.route('/api/sport-links')
+def api_sport_links():
+    with _sport_iptv_index_lock:
+        return jsonify({'ok': True, 'links': dict(_sport_iptv_index)})
 
-@app.route('/api/event-channel', methods=['POST', 'DELETE'])
-def api_event_channel():
+@app.route('/api/sport-link', methods=['POST', 'DELETE'])
+def api_sport_link():
     data = request.get_json(force=True, silent=True) or {}
-    slug = (data.get('slug') or '').strip()
-    if request.method == 'DELETE':
-        links = _read_event_links()
-        links.pop(slug, None)
-        _save_event_links(links)
-        return jsonify({'ok': True})
+    sport = (data.get('sport') or '').strip()
     channel_id = (data.get('channel_id') or '').strip()
-    if not slug or not channel_id:
-        return jsonify({'ok': False, 'error': 'slug and channel_id required'}), 400
+    if not sport or not channel_id:
+        return jsonify({'ok': False, 'error': 'sport and channel_id required'}), 400
     links = _read_event_links()
-    links[slug] = channel_id
+    if request.method == 'DELETE':
+        cur = links.get(sport, [])
+        if isinstance(cur, list):
+            links[sport] = [c for c in cur if c != channel_id]
+        elif isinstance(cur, str) and cur == channel_id:
+            del links[sport]
+        else:
+            links.pop(sport, None)
+    else:
+        cur = links.get(sport, [])
+        if isinstance(cur, str):
+            cur = [cur]
+        if channel_id not in cur:
+            cur.append(channel_id)
+        links[sport] = cur
     _save_event_links(links)
+    _refresh_sport_index()
     return jsonify({'ok': True})
 
 @app.route('/api/iptv-channels')
@@ -553,7 +564,11 @@ def watch(slug):
             event = e
             break
     sport = (event or {}).get('sport', '')
-    return render_template('watch.html', slug=slug, event=event, streams=streams, sport=sport)
+    with _sport_iptv_index_lock:
+        sport_iptv_ids = list(_sport_iptv_index.get(sport, []))
+    with _iptv_lock:
+        sport_iptv_channels = [ch for ch in _IPTV_CHANNELS if ch['id'] in sport_iptv_ids]
+    return render_template('watch.html', slug=slug, event=event, streams=streams, sport=sport, sport_iptv_channels=sport_iptv_channels)
 
 @app.route('/lite/<slug>')
 def watch_lite(slug):
@@ -630,15 +645,14 @@ def _build_playlist_for_event(e, seen_slugs=None):
         if u:
             lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{t} LIVE {i+1}",{t} LIVE {i+1}')
             lines.append(u)
-    links = _read_event_links()
-    linked_id = links.get(slug) or links.get(sport)
-    if linked_id:
+    with _sport_iptv_index_lock:
+        linked_ids = list(_sport_iptv_index.get(sport, []))
+    if linked_ids:
         with _iptv_lock:
             for ch in _IPTV_CHANNELS:
-                if ch['id'] == linked_id:
+                if ch['id'] in linked_ids:
                     lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
                     lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
-                    break
     return lines
 
 @app.route('/playlist/<slug>.m3u')
@@ -1036,6 +1050,30 @@ def _apply_staging():
 
 # Apply staged update before anything else
 _apply_staging()
+
+# Build sport->channel links index from event_channel_links.json
+def _rebuild_sport_index():
+    links = _read_event_links()
+    index = {}
+    for key, val in links.items():
+        if isinstance(val, list):
+            index[key] = val
+        elif isinstance(val, str):
+            index[key] = [val]
+        else:
+            index[key] = []
+    return index
+
+_sport_iptv_index = {}
+_sport_iptv_index_lock = threading.Lock()
+
+def _refresh_sport_index():
+    global _sport_iptv_index
+    idx = _rebuild_sport_index()
+    with _sport_iptv_index_lock:
+        _sport_iptv_index = idx
+
+_refresh_sport_index()
 
 @app.route('/api/update/restart')
 def update_restart():
