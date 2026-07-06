@@ -83,6 +83,11 @@ _manifest_cache = {} # (slug, idx) -> (ts, body)
 _m3u_cache = {}
 _DECRYPT_KEY_CACHE = {}
 
+def _clean_url(url):
+    if '|' in url:
+        return url[:url.index('|')]
+    return url
+
 _EV_TTL = 15
 _PB_TTL = 30
 _M3U_TTL = 30
@@ -182,10 +187,10 @@ def _decrypt(enc_b64, bucket):
 def _resolve_one(slug):
     streams = _pb_cached(slug)
     for s in streams:
-        u = s.get('stream_url', '')
+        u = _clean_url(s.get('stream_url', ''))
         if '.m3u8' in u:
             return u
-    return streams[0]['stream_url'] if streams else None
+    return _clean_url(streams[0]['stream_url']) if streams else None
 
 def _resolve_many(slugs):
     if not slugs:
@@ -220,349 +225,13 @@ def index():
     return render_template('index.html')
 
 # ---------------------------------------------------------------------------
-# IPTV channels (from M3U)
+# Event helpers
 # ---------------------------------------------------------------------------
-IPTV_PLAYLIST = Path(__file__).parent / 'combined-playlist.m3u'
-CUSTOM_M3U_NAMES_FILE = Path(__file__).parent / 'custom_m3u_names.json'
-_custom_m3u_names = {}  # name -> slug
-
-def _save_custom_m3u_names():
-    try:
-        CUSTOM_M3U_NAMES_FILE.write_text(json.dumps(_custom_m3u_names), encoding='utf-8')
-    except Exception:
-        pass
-
-def _load_custom_m3u_names():
-    global _custom_m3u_names
-    try:
-        if CUSTOM_M3U_NAMES_FILE.exists():
-            _custom_m3u_names = json.loads(CUSTOM_M3U_NAMES_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        _custom_m3u_names = {}
-
-_load_custom_m3u_names()
-
-M3U_SOURCE_FILE = Path(__file__).parent / 'MAINM3U.txt'
-
-def _get_m3u_urls():
-    if M3U_SOURCE_FILE.exists():
-        lines = [l.strip() for l in M3U_SOURCE_FILE.read_text(encoding='utf-8').splitlines() if l.strip()]
-        return lines if lines else ['https://raw.githubusercontent.com/abusaeeidx/Mrgify-BDIX-IPTV/main/playlist.m3u']
-    return ['https://raw.githubusercontent.com/abusaeeidx/Mrgify-BDIX-IPTV/main/playlist.m3u']
-_IPTV_CHANNELS = []
-_SPORTS_GROUP_NAMES = {'Pixelsports','CricHD','Sports','Live Sports','Sport'}
-_iptv_lock = threading.Lock()
-_SPORTS_KEYWORDS = [
-    'nfl','nba','mlb','nhl','ncaa','ncaab','ncaaf','espn','fox sports',
-    'nfl network','nba tv','mlb network','nhl network','nfl redzone','nfl sunday',
-    'mlb strike','nhl center ice','nba league pass',
-    'sport','sports','live sport','sports live','sports hd','sport hd',
-    'cricket','football','tennis','soccer','basketball','baseball','hockey',
-    'boxing','ufc','wwe','aew','wrestling','mma','fight','fighting',
-    'f1','motogp','nascar','indycar','daytona','supercross','superbike',
-    'motorsport','motorsports','racing','race','rally','formula 1','grand prix',
-    'golf','pga','lpga','masters','olympic','olympics','paralympic',
-    'epl','premier league','la liga','serie a','bundesliga','ligue 1',
-    'champions league','europa league','uefa','ucl','uel','fifa','world cup',
-    'super bowl','superbowl','playoffs','play-off','final','finals','cup',
-    'acc network','sec network','big ten','big 12','pac-12','ivy league',
-    'bein','bein sport','sky sport','sky sports','tnt sport','tnt sports',
-    'eurosport','bt sport','bt sports','cbs sports','nbcsports','abc sport',
-    'world sport','xtra sport','sportsnet','tsn','thescore',
-    'rugby','volleyball','handball','badminton','table tennis','swimming',
-    'athletics','cycling','darts','snooker','billiards','poker','esports',
-    'derby','classic','series','tournament','championship','league','match',
-    'tennis channel','golf channel','olympic channel','fight network',
-    'red bull','extreme','outdoor','fishing',
-    'mls','afl','nrl','cfl','wnba','pba','nba tv','nhl network',
-    'bein sports','sky sports main event','sky sports premier',
-    'sports 18','star sports','ten sports','sony sports','super sport',
-]
-
-def _is_sports(entry):
-    name = (entry.get('name') or '').lower()
-    group = (entry.get('group') or '').lower()
-    if group in _SPORTS_GROUP_NAMES:
-        return True
-    text = name + ' ' + group
-    for kw in _SPORTS_KEYWORDS:
-        if kw in text:
-            return True
-    return False
-
-def _load_iptv():
-    global _IPTV_CHANNELS
-    new_channels = []
-    seen_ids = set()
-    old_idx = 0
-    merged_text = ''
-    for url in _get_m3u_urls():
-        st, body = _http_get(url)
-        if st == 200 and body:
-            merged_text += '\n' + body
-    if merged_text.strip():
-        IPTV_PLAYLIST.write_text(merged_text.strip(), encoding='utf-8')
-    if not IPTV_PLAYLIST.exists():
-        return
-    text = IPTV_PLAYLIST.read_text(encoding='utf-8')
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        if lines[i].startswith('#EXTINF:'):
-            entry = {'id': '', 'name': '', 'logo': '', 'group': '', 'url': '', 'user_agent': '', 'referer': '', 'tvg_id': ''}
-            infoline = lines[i]
-            m = re.search(r'tvg-id="([^"]*)"', infoline)
-            if m: entry['tvg_id'] = m.group(1)
-            m = re.search(r'tvg-logo="([^"]*)"', infoline)
-            if m: entry['logo'] = m.group(1)
-            m = re.search(r'group-title="([^"]*)"', infoline)
-            if m: entry['group'] = m.group(1)
-            comma = infoline.rfind(',')
-            if comma >= 0:
-                entry['name'] = infoline[comma+1:].strip()
-            i += 1
-            while i < len(lines) and lines[i].startswith('#EXTVLCOPT:'):
-                opt = lines[i].replace('#EXTVLCOPT:', '')
-                if opt.startswith('http-user-agent='):
-                    entry['user_agent'] = opt.split('=', 1)[1]
-                elif opt.startswith('http-referrer='):
-                    entry['referer'] = opt.split('=', 1)[1]
-                i += 1
-            if i < len(lines) and not lines[i].startswith('#'):
-                entry['url'] = lines[i].strip()
-            if entry['name'] and entry['url'] and _is_sports(entry):
-                entry['id'] = hashlib.md5(entry['url'].encode()).hexdigest()[:12]
-                if entry['id'] not in seen_ids:
-                    seen_ids.add(entry['id'])
-                    entry['_old_idx'] = old_idx
-                    old_idx += 1
-                    new_channels.append(entry)
-        i += 1
-    with _iptv_lock:
-        _IPTV_CHANNELS = new_channels
-
-_load_iptv()
-with _iptv_lock:
-    _log.info('Loaded %d IPTV channels', len(_IPTV_CHANNELS))
-
-def _refresh_iptv_loop():
-    while True:
-        time.sleep(3600)
-        try:
-            _load_iptv()
-            _refresh_sport_index()
-            with _iptv_lock:
-                _log.info('M3U refreshed: %d channels', len(_IPTV_CHANNELS))
-        except Exception:
-            _log.warning('M3U refresh failed', exc_info=True)
-
-threading.Thread(target=_refresh_iptv_loop, daemon=True).start()
-
-# ---------------------------------------------------------------------------
-# Event helpers + IPTV channel linking
-# ---------------------------------------------------------------------------
-EVENT_CHANNEL_LINKS_FILE = STATIC_DIR / 'event_channel_links.json'
-_excluded_iptv = set()  # dead channel IDs (auto-detected on startup)
-
-def _read_event_links():
-    if EVENT_CHANNEL_LINKS_FILE.exists():
-        try:
-            return json.loads(EVENT_CHANNEL_LINKS_FILE.read_text())
-        except Exception:
-            pass
-    return {}
-
-def _save_event_links(links):
-    EVENT_CHANNEL_LINKS_FILE.write_text(json.dumps(links, indent=2))
-
 def _fetch_events():
     return json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or []
 
 def _get_events():
     return _cached('events', _EV_TTL, _fetch_events, _ev_cache)
-
-def _dedup_events(events):
-    seen = {}
-    for e in events:
-        key = (e.get('team1',''), e.get('team2',''), e.get('title',''), e.get('sport',''))
-        if key not in seen:
-            seen[key] = e
-    return list(seen.values())
-
-def _validate_channel(ch, timeout=6):
-    start = time.time()
-    target = ch['url']
-    ua = ch.get('user_agent', '')
-    ref = ch.get('referer', '')
-    headers = {}
-    if ua: headers['User-Agent'] = ua
-    if ref: headers['Referer'] = ref
-    http = _media_sess()
-    base_url = target[:target.rfind('/') + 1]
-    try:
-        resp = http.get(target, headers=headers or None, timeout=min(5, timeout))
-        if resp.status_code != 200:
-            return ch['id'], False, f'status {resp.status_code}'
-        ct = (resp.headers.get('content-type', '') or '').lower()
-        text = resp.text
-        if text.startswith('#EXT') or '.m3u8' in target:
-            if not text.startswith('#EXT'):
-                return ch['id'], False, 'not a playlist'
-            elapsed = time.time() - start
-            if elapsed > timeout:
-                return ch['id'], False, 'timeout'
-            try:
-                _iptv_rewrite(text, ch, base_url)
-            except Exception:
-                return ch['id'], False, 'rewrite failed'
-            remaining = timeout - elapsed
-            seg_url = None
-            for line in text.splitlines():
-                s = line.strip()
-                if s and not s.startswith('#'):
-                    seg_url = urljoin(base_url, s) if not s.startswith('http') else s
-                    break
-            if seg_url and remaining > 1.5:
-                seg_timeout = min(3, remaining)
-                try:
-                    seg_resp = http.get(seg_url, headers=headers or None, timeout=seg_timeout)
-                    if seg_resp.status_code not in (200, 206) or len(seg_resp.content) == 0:
-                        return ch['id'], False, 'bad segment'
-                except Exception:
-                    return ch['id'], False, 'seg timeout'
-                remaining2 = timeout - (time.time() - start)
-                key_match = re.search(r'#EXT-X-KEY[^:]*:.*URI="([^"]*)"', text)
-                if key_match and remaining2 > 1:
-                    key_url = key_match.group(1)
-                    if not key_url.startswith('http'):
-                        key_url = urljoin(base_url, key_url)
-                    try:
-                        kr = http.get(key_url, headers=headers or None, timeout=min(3, remaining2))
-                        if kr.status_code != 200 or len(kr.content) == 0:
-                            return ch['id'], False, 'bad key'
-                    except Exception:
-                        return ch['id'], False, 'key timeout'
-        else:
-            if 'text/html' in ct or 'text/plain' in ct:
-                if len(resp.content) < 2048:
-                    return ch['id'], False, 'not video content'
-    except Exception as e:
-        return ch['id'], False, str(e)[:50]
-    return ch['id'], True, 'ok'
-
-_validation_in_progress = False
-
-def _validate_all_channels(timeout=6):
-    global _excluded_iptv, _validation_in_progress
-    _validation_in_progress = True
-    with _iptv_lock:
-        channels = list(_IPTV_CHANNELS)
-    _log.info('Validating %d IPTV channels (%ds timeout, 60 workers)...', len(channels), timeout)
-    results = {}
-    with ThreadPoolExecutor(max_workers=60) as pool:
-        fut_map = {pool.submit(_validate_channel, c, timeout): c for c in channels}
-        for f in as_completed(fut_map):
-            try:
-                cid, ok, reason = f.result()
-                results[cid] = (ok, reason)
-            except Exception:
-                pass
-    dead = set(cid for cid, (ok, _) in results.items() if not ok)
-    with _iptv_lock:
-        _excluded_iptv = dead
-    ok_count = len(results) - len(dead)
-    _log.info('Validation done: %d ok, %d dead', ok_count, len(dead))
-    for c in channels:
-        cid = c['id']
-        if cid in results and not results[cid][0]:
-            _log.info('  DEAD: %s — %s', c.get('name', '?'), results[cid][1])
-    _validation_in_progress = False
-
-# Retry dead channels periodically
-def _retry_dead_loop():
-    global _excluded_iptv
-    while True:
-        time.sleep(120)
-        try:
-            with _iptv_lock:
-                dead = set(_excluded_iptv)
-            if not dead:
-                continue
-            with _iptv_lock:
-                channels = list(_IPTV_CHANNELS)
-            to_retry = [c for c in channels if c['id'] in dead]
-            if not to_retry:
-                continue
-            _log.info('Retrying %d dead channels...', len(to_retry))
-            with ThreadPoolExecutor(max_workers=30) as pool:
-                fut_map = {pool.submit(_validate_channel, c, 5): c for c in to_retry}
-                revived = set()
-                for f in as_completed(fut_map):
-                    try:
-                        cid, ok, _ = f.result()
-                        if ok:
-                            revived.add(cid)
-                    except Exception:
-                        pass
-            if revived:
-                with _iptv_lock:
-                    _excluded_iptv -= revived
-                _log.info('Revived %d channels', len(revived))
-        except Exception:
-            _log.warning('Retry loop error', exc_info=True)
-
-# Run validation in background after startup
-def _startup_validate():
-    time.sleep(15)
-    try:
-        _validate_all_channels(timeout=6)
-    except Exception as e:
-        _log.warning('Startup validation failed: %s', e)
-        _validation_in_progress = False
-
-threading.Thread(target=_startup_validate, daemon=True).start()
-threading.Thread(target=_retry_dead_loop, daemon=True).start()
-
-# ---------------------------------------------------------------------------
-# Event-channel linking API
-# ---------------------------------------------------------------------------
-@app.route('/api/sport-links')
-def api_sport_links():
-    with _sport_iptv_index_lock:
-        return jsonify({'ok': True, 'links': dict(_sport_iptv_index)})
-
-@app.route('/api/sport-link', methods=['POST', 'DELETE'])
-def api_sport_link():
-    data = request.get_json(force=True, silent=True) or {}
-    sport = (data.get('sport') or '').strip()
-    channel_id = (data.get('channel_id') or '').strip()
-    if not sport or not channel_id:
-        return jsonify({'ok': False, 'error': 'sport and channel_id required'}), 400
-    links = _read_event_links()
-    if request.method == 'DELETE':
-        cur = links.get(sport, [])
-        if isinstance(cur, list):
-            links[sport] = [c for c in cur if c != channel_id]
-        elif isinstance(cur, str) and cur == channel_id:
-            del links[sport]
-        else:
-            links.pop(sport, None)
-    else:
-        cur = links.get(sport, [])
-        if isinstance(cur, str):
-            cur = [cur]
-        if channel_id not in cur:
-            cur.append(channel_id)
-        links[sport] = cur
-    _save_event_links(links)
-    _refresh_sport_index()
-    return jsonify({'ok': True})
-
-@app.route('/api/iptv-channels')
-def api_iptv_channels():
-    with _iptv_lock:
-        alive = [c for c in _IPTV_CHANNELS if c['id'] not in _excluded_iptv]
-        return jsonify({'ok': True, 'channels': alive, 'total': len(_IPTV_CHANNELS), 'dead': len(_excluded_iptv), 'validating': _validation_in_progress})
 
 @app.route('/watch/<slug>')
 def watch(slug):
@@ -575,24 +244,7 @@ def watch(slug):
             event = e
             break
     sport = (event or {}).get('sport', '')
-    with _sport_iptv_index_lock:
-        sport_iptv_ids = list(_sport_iptv_index.get(sport, []))
-    with _iptv_lock:
-        sport_iptv_channels = [ch for ch in _IPTV_CHANNELS if ch['id'] in sport_iptv_ids]
-    return render_template('watch.html', slug=slug, event=event, streams=streams, sport=sport, sport_iptv_channels=sport_iptv_channels)
-
-@app.route('/lite/<slug>')
-def watch_lite(slug):
-    ev_fut = _POOL.submit(_get_events)
-    streams = _pb_cached(slug)
-    events = ev_fut.result()
-    event = None
-    for e in events:
-        if e.get('enc_parent') == slug or e.get('parent') == slug or e.get('id') == slug:
-            event = e
-            break
-    sport = (event or {}).get('sport', '')
-    return render_template('watch_lite.html', slug=slug, event=event, streams=streams, sport=sport)
+    return render_template('watch.html', slug=slug, event=event, streams=streams, sport=sport)
 
 @app.route('/stream/<slug>/<int:idx>')
 def stream_json(slug, idx):
@@ -601,7 +253,7 @@ def stream_json(slug, idx):
         return jsonify({"error": "Not found"}), 404
     s = streams[idx]
     return jsonify({
-        "url": s['stream_url'],
+        "url": _clean_url(s['stream_url']),
         "type": s.get('stream_type', ''),
         "drm": {"key": s['drm_key'], "kid": s['drm_kid']} if s.get('drm_key') else None,
     })
@@ -640,14 +292,13 @@ def _find_event(slug):
     return None
 
 def _build_playlist_for_event(e, seen_slugs=None):
-    """Build M3U lines for a single event + its IPTV channels."""
+    """Build M3U lines for a single event."""
     if seen_slugs is None:
         seen_slugs = set()
     slug = e.get('enc_parent') or e.get('parent') or e.get('id')
     if not slug or slug in seen_slugs:
         return []
     seen_slugs.add(slug)
-    sport = e.get('sport', 'Sports')
     lines = []
     streams = _pb_cached(slug)
     t = f"{e.get('team_a_name', '?')} vs {e.get('team_b_name', '?')}"
@@ -656,14 +307,6 @@ def _build_playlist_for_event(e, seen_slugs=None):
         if u:
             lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{t} LIVE {i+1}",{t} LIVE {i+1}')
             lines.append(u)
-    with _sport_iptv_index_lock:
-        linked_ids = list(_sport_iptv_index.get(sport, []))
-    if linked_ids:
-        with _iptv_lock:
-            for ch in _IPTV_CHANNELS:
-                if ch['id'] in linked_ids and ch['id'] not in _excluded_iptv:
-                    lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
-                    lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
     return lines
 
 @app.route('/playlist/<slug>.m3u')
@@ -684,19 +327,9 @@ def event_playlist_m3u(slug):
 
 @app.route('/<name>.m3u')
 def custom_playlist_m3u(name):
-    """Friendly .m3u — exact custom name first, then fuzzy match."""
+    """Friendly .m3u — fuzzy match by event name / slug / sport."""
     events = _get_events()
     name_lower = name.lower().replace('-', ' ').replace('_', ' ')
-
-    # exact custom name match
-    if name in _custom_m3u_names:
-        slug = _custom_m3u_names[name]
-        for e in events:
-            eslug = e.get('enc_parent') or e.get('parent') or e.get('id')
-            if eslug == slug:
-                lines = ["#EXTM3U"]
-                lines.extend(_build_playlist_for_event(e, set()))
-                return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
     # fuzzy match
     seen = set()
@@ -724,25 +357,6 @@ def custom_playlist_m3u(name):
         lines.extend(_build_playlist_for_event(e, seen_slugs))
     return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
-@app.route('/api/custom-m3u', methods=['GET', 'POST', 'DELETE'])
-def api_custom_m3u():
-    if request.method == 'GET':
-        return jsonify({'ok': True, 'names': dict(_custom_m3u_names)})
-    data = request.get_json(force=True, silent=True) or {}
-    name = (data.get('name') or '').strip().lower().replace(' ', '-')
-    slug = (data.get('slug') or '').strip()
-    if request.method == 'DELETE':
-        _custom_m3u_names.pop(name, None)
-        _save_custom_m3u_names()
-        return jsonify({'ok': True})
-    if not name or not slug:
-        return jsonify({'ok': False, 'error': 'name and slug required'}), 400
-    if not re.match(r'^[a-z0-9-]+$', name):
-        return jsonify({'ok': False, 'error': 'name must be lowercase alphanumeric with hyphens'}), 400
-    _custom_m3u_names[name] = slug
-    _save_custom_m3u_names()
-    return jsonify({'ok': True, 'name': name, 'slug': slug})
-
 @app.route('/api/<path:subpath>')
 def proxy_api(subpath):
     if '..' in subpath or '~' in subpath:
@@ -767,115 +381,6 @@ def _hls_rewrite(body, base_dir):
             out.append(urljoin(base_dir, s))
     return '\n'.join(out)
 
-def _iptv_rewrite(body, ch, base_dir=''):
-    lines = body.split('\n')
-    out = []
-    prefix = f'/proxy/iptv/{ch["id"]}/seg/'
-    for line in lines:
-        s = line.strip()
-        if not s:
-            out.append(line)
-        elif s[0] == '#':
-            def repl_uri(m):
-                url = m.group(1) or m.group(2)
-                abs_url = urljoin(base_dir, url) if base_dir else url
-                b64 = base64.urlsafe_b64encode(abs_url.encode()).decode().rstrip('=')
-                return f'URI="{prefix}{b64}"'
-            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', repl_uri, line))
-        else:
-            abs_url = urljoin(base_dir, s) if base_dir else s
-            b64 = base64.urlsafe_b64encode(abs_url.encode()).decode().rstrip('=')
-            out.append(f'{prefix}{b64}')
-    return '\n'.join(out)
-
-@app.route('/proxy/iptv/<channel_id>/')
-def proxy_iptv(channel_id):
-    ch = None
-    with _iptv_lock:
-        for c in _IPTV_CHANNELS:
-            if c['id'] == channel_id:
-                ch = c
-                break
-        if not ch:
-            return jsonify({"error": "Not found"}), 404
-        if ch['id'] in _excluded_iptv:
-            return jsonify({"error": "Channel dead"}), 503
-    target = ch['url']
-    ua = ch.get('user_agent', '')
-    ref = ch.get('referer', '')
-    headers = {}
-    if ua:
-        headers['User-Agent'] = ua
-    if ref:
-        headers['Referer'] = ref
-    http = _media_sess()
-    for attempt in range(2):
-        try:
-            resp = http.get(target, headers=headers or None)
-            if resp.status_code == 200:
-                ct = resp.headers.get('content-type', '')
-                is_m3u = '.m3u8' in target or 'mpegurl' in ct or 'm3u8' in ct
-                if is_m3u:
-                    text = resp.text
-                    base_dir = target[:target.rfind('/') + 1]
-                    r = Response(_iptv_rewrite(text, ch, base_dir), content_type='application/vnd.apple.mpegurl')
-                    r.headers['Access-Control-Allow-Origin'] = '*'
-                    return r
-                r = Response(resp.content, content_type=ct or 'application/octet-stream')
-                r.headers['Access-Control-Allow-Origin'] = '*'
-                return r
-        except Exception:
-            if attempt == 0:
-                time.sleep(1)
-    return jsonify({"error": "Upstream failed"}), 502
-
-@app.route('/proxy/iptv/<channel_id>/seg/<path:b64url>')
-def proxy_iptv_seg(channel_id, b64url):
-    ch = None
-    with _iptv_lock:
-        for c in _IPTV_CHANNELS:
-            if c['id'] == channel_id:
-                ch = c
-                break
-        if not ch:
-            return jsonify({"error": "Not found"}), 404
-        if ch['id'] in _excluded_iptv:
-            return jsonify({"error": "Channel dead"}), 503
-    try:
-        padding = 4 - len(b64url) % 4
-        if padding != 4:
-            b64url += '=' * padding
-        target = base64.urlsafe_b64decode(b64url).decode()
-    except Exception:
-        return jsonify({"error": "Bad URL"}), 400
-    ua = ch.get('user_agent', '')
-    ref = ch.get('referer', '')
-    headers = {}
-    if ua:
-        headers['User-Agent'] = ua
-    if ref:
-        headers['Referer'] = ref
-    http = _media_sess()
-    for attempt in range(2):
-        try:
-            resp = http.get(target, headers=headers or None)
-            if resp.status_code in (200, 206):
-                ct = resp.headers.get('content-type', '')
-                is_m3u = '.m3u8' in target or 'mpegurl' in ct or 'm3u8' in ct
-                if is_m3u:
-                    text = resp.text
-                    seg_base = target[:target.rfind('/') + 1] if '/' in target else ''
-                    r = Response(_iptv_rewrite(text, ch, seg_base), content_type='application/vnd.apple.mpegurl')
-                    r.headers['Access-Control-Allow-Origin'] = '*'
-                    return r
-                cors = Response(resp.content, content_type=ct or 'application/octet-stream')
-                cors.headers['Access-Control-Allow-Origin'] = '*'
-                return cors
-        except Exception:
-            if attempt == 0:
-                time.sleep(1)
-    return jsonify({"error": "Upstream failed"}), 502
-
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
     target = request.args.get('url', '')
@@ -884,10 +389,12 @@ def proxy_hls(slug, idx):
         return jsonify({"error": "Not found"}), 404
     s = streams[idx]
     if not target:
-        target = s['stream_url']
+        target = _clean_url(s['stream_url'])
+    else:
+        target = _clean_url(target)
     p = urlparse(target)
     if not p.netloc:
-        target = urljoin(s['stream_url'][:s['stream_url'].rfind('/') + 1], target)
+        target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
     ref = s.get('referer', '')
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     def _fetch(url):
@@ -917,8 +424,8 @@ def proxy_dash_seg(slug, idx, seg_path):
     if not streams or idx >= len(streams):
         return jsonify({"error": "Not found"}), 404
     s = streams[idx]
-    base_dir = s['stream_url']
-    base_dir = base_dir[:base_dir.rfind('/') + 1]
+    base_url = _clean_url(s['stream_url'])
+    base_dir = base_url[:base_url.rfind('/') + 1]
     target = urljoin(base_dir, seg_path)
     qs = request.query_string
     if qs:
@@ -949,7 +456,8 @@ def proxy_manifest(slug, idx):
     if not streams or idx >= len(streams):
         return jsonify({"error": "Not found"}), 404
     s = streams[idx]
-    url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
+    raw_url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
+    url = _clean_url(raw_url)
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     for attempt in range(3):
         try:
@@ -961,9 +469,13 @@ def proxy_manifest(slug, idx):
             if '.mpd' in url:
                 body = re.sub(r'<ContentProtection[^>]*/>', '', body)
                 body = re.sub(r'<ContentProtection[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
+                # Inject ClearKey ContentProtection — dashjs needs at least
+                # one ContentProtection element to activate its DRM path.
                 if drm_kid and drm_key:
-                    ck = '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>'
-                    body = body.replace('</AdaptationSet>', ck + '\n</AdaptationSet>')
+                    body = body.replace(
+                        '</AdaptationSet>',
+                        '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>\n</AdaptationSet>',
+                        1)
             _manifest_cache[key] = (time.time(), body)
             return Response(body, content_type='application/dash+xml')
         except Exception:
@@ -973,7 +485,8 @@ def proxy_manifest(slug, idx):
             _pb_cache.pop(slug, None)
             streams = _pb_cached(slug)
             if streams and idx < len(streams):
-                url = streams[idx]['stream_url']
+                raw_url = streams[idx]['stream_url']
+                url = _clean_url(raw_url)
     return jsonify({"error": "Manifest failed"}), 502
 
 @app.route('/proxy/manifest/<slug>/<int:idx>/<path:seg_path>')
@@ -1038,8 +551,7 @@ def _apply_staging():
         src = Path(staging_path)
         for item in src.iterdir():
             if item.name in ('python', 'Zero_live.bat', 'version.txt',
-                'combined-playlist.m3u', 'custom_m3u_names.json',
-                'custom_m3u_url.txt', '.update_staging', '.launch_args',
+                '.update_staging', '.launch_args',
                 'default_theme.txt', 'logs'):
                 continue
             dst = base / item.name
@@ -1075,29 +587,7 @@ def _apply_staging():
 # Apply staged update before anything else
 _apply_staging()
 
-# Build sport->channel links index from event_channel_links.json
-def _rebuild_sport_index():
-    links = _read_event_links()
-    index = {}
-    for key, val in links.items():
-        if isinstance(val, list):
-            index[key] = val
-        elif isinstance(val, str):
-            index[key] = [val]
-        else:
-            index[key] = []
-    return index
 
-_sport_iptv_index = {}
-_sport_iptv_index_lock = threading.Lock()
-
-def _refresh_sport_index():
-    global _sport_iptv_index
-    idx = _rebuild_sport_index()
-    with _sport_iptv_index_lock:
-        _sport_iptv_index = idx
-
-_refresh_sport_index()
 
 @app.route('/api/update/restart')
 def update_restart():

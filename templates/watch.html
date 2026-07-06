@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20"></script>
 <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -679,13 +680,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   .server-section .row{gap:4px}
   .srv-btn,.q-btn{padding:6px 10px;font-size:12px}
 }
-.iptv-btn{--iptv-accent:#a855f7;border-color:var(--iptv-accent);color:var(--iptv-accent)}
-.iptv-btn:hover{border-color:#c084fc;color:#c084fc}
-.iptv-btn.active{background:var(--iptv-accent);border-color:var(--iptv-accent);color:#fff}
-.iptv-header-btn{background:var(--accent-dim);color:var(--accent);border-color:rgba(168,85,247,.25)!important}
-.iptv-header-btn:hover{background:#a855f7!important;color:#fff!important;border-color:#a855f7!important}
-.iptv-list-item:hover{background:var(--bg-hover)!important}
-.iptv-list-item.active{background:var(--accent-dim)!important}
 </style>
 </head>
 <body>
@@ -725,7 +719,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       </div>
     </div>
     <div class="header-right">
-      <button class="btn-m3u iptv-header-btn" id="iptvAssignBtn" title="Assign IPTV Channel">IPTV</button>
       <a href="/playlist/{{ slug }}.m3u" class="btn-m3u" download>M3U</a>
     </div>
   </div>
@@ -840,6 +833,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <div class="section-top">
         <div class="section-label">Stream Servers</div>
         <div style="display:flex;gap:6px;align-items:center">
+          <button type="button" id="btn-refresh-player" class="dl-m3u" style="border-color:rgba(99,102,241,.25);color:#818cf8">⟳ Refresh</button>
           <button class="dl-m3u" id="vlcBtn" style="border-color:rgba(255,117,24,.25);color:#ff7518">VLC</button>
           <a href="/playlist/{{ slug }}.m3u" class="dl-m3u" download>M3U</a>
         </div>
@@ -849,8 +843,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <button class="srv-btn" data-idx="{{ loop.index0 }}">LIVE {{ loop.index }}</button>
       {% endfor %}
     </div>
-    <div class="section-label" id="iptvSectionLabel" style="display:none">IPTV Channels</div>
-    <div class="row" id="iptvServerRow" style="display:none"></div>
   </div>
 
   <div class="server-section" id="qualitySection">
@@ -875,31 +867,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   </div>
 </div>
 
-<!-- IPTV Assignment Modal (per-sport) -->
-<div class="modal-overlay" id="iptvModal">
-  <div class="modal-box" style="max-width:500px">
-    <div class="modal-header">
-      <span>IPTV Channels — <span id="iptvSportName" style="color:var(--accent)">{{ sport|e or 'Sports' }}</span></span>
-      <button id="iptvModalClose">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="field">
-        <label>Assigned Channels (click to remove)</label>
-        <div id="iptvAssignedList" style="min-height:40px;max-height:120px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg-card);padding:6px;margin-bottom:8px"></div>
-      </div>
-      <div class="field">
-        <label>Search Available Channels</label>
-        <input id="iptvSearch" type="text" placeholder="Type to filter..." style="width:100%;padding:8px 10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none;font-family:inherit">
-      </div>
-      <div id="iptvChannelList" style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg-card);padding:4px"></div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="modal-btn" id="iptvRefreshBtn">Refresh Channels</button>
-      </div>
-      <div id="iptvStatus" style="margin-top:8px;font-size:11px;color:var(--text-tertiary)"></div>
-    </div>
-  </div>
-</div>
-
 <footer class="footer">ZeroLive &mdash; Free sports streaming<br><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;opacity:.5">MADE BY RAFIUL HASAN RAFI</span></footer>
 
 <script>
@@ -912,22 +879,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var qualityRow = document.getElementById('qualityRow');
   var streams = {{ streams | tojson }};
   var slug = '{{ slug }}';
-  var eventSport = '{{ sport|e }}';
-  var iptvChannels = {{ sport_iptv_channels | tojson }};
-  // Append IPTV channels to stream fallback chain
-  if (iptvChannels && iptvChannels.length) {
-    iptvChannels.forEach(function(ch) {
-      streams.push({
-        stream_url: ch.url,
-        stream_type: 'hls',
-        _iptv: true,
-        _iptv_id: ch.id,
-        name: ch.name,
-        drm_kid: '',
-        drm_key: ''
-      });
-    });
-  }
   var player = null;
   var activeIdx = -1;
   var fallbackTried = {};
@@ -1213,6 +1164,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   function destroyPlayer() {
     qualityRow.innerHTML='<button class="q-btn active">Auto</button>';
     qualityGroup.style.display='none';
+    var embedFrame=document.getElementById('embed-frame');
+    if(embedFrame){embedFrame.remove();video.style.display='block';}
     if(player){
       try{
         var p=player;
@@ -1220,6 +1173,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         else if(p.reset&&typeof p.reset==='function'){p.reset();}
         else if(p.detachMedia&&typeof p.detachMedia==='function'){p.detachMedia();}
         else if(p.stop&&typeof p.stop==='function'){try{p.stop();}catch(_){}}
+        else if(p.unload&&typeof p.unload==='function'){p.unload();}
       }catch(_){}
       player=null;
     }
@@ -1238,6 +1192,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     })['catch'](function(){});
   }
 
+  function normHex(s){return (s||'').replace(/-/g,'').toLowerCase();}
+
   function loadStream(idx){
     L('loadStream('+idx+') called');
     lastProgress=Date.now();
@@ -1251,24 +1207,26 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     showPlaceholder('Loading stream...');
     spinner.classList.remove('hidden');
     try{
-      var url=stream.stream_url;
+      var rawUrl=stream.stream_url;
+      var pipeIdx=rawUrl.indexOf('|');
+      if(pipeIdx!==-1)rawUrl=rawUrl.substring(0,pipeIdx);
       var type=stream.stream_type||'';
       var drmKid=stream.drm_kid||'';
       var drmKey=stream.drm_key||'';
-      var isDash=(type==='dash'||(url&&url.includes('.mpd')));
-      var isHls=(type==='hls'||(url&&url.includes('.m3u8')));
-      if(isDash)url='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+      var isDash=(type==='dash'||(rawUrl&&rawUrl.includes('.mpd')));
+      var isHls=(type==='hls'||(rawUrl&&rawUrl.includes('.m3u8')));
+      var isMpegts=(type==='mpegts'||(rawUrl&&rawUrl.includes('.ts')));
+      var isEmbed=(type==='embed');
       if(type==='hls'||type==='dash')setLiveMode(true);
 
       if(isDash){
         if(typeof dashjs==='undefined'){showPlaceholder('Dash.js failed to load.');spinner.classList.add('hidden');return;}
         showVideo();
+        var proxyUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
         var dashPlayer=dashjs.MediaPlayer().create();
-        dashPlayer.updateSettings({
-          streaming:{buffer:{bufferToKeep:60,maxBufferTime:120,bufferTimeAtTopQuality:60,stableBufferTime:60},scheduleWhilePaused:false},
-        });
         if(drmKid && drmKey){
-          var ck={};ck[drmKid.toLowerCase()]=drmKey.toLowerCase();
+          var kid=normHex(drmKid),key=normHex(drmKey);
+          var ck={};ck[kid]=key;
           dashPlayer.setProtectionData({'org.w3.clearkey':{'clearkeys':ck}});
         }
         dashPlayer.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED,function(){
@@ -1282,18 +1240,14 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           if(fallbackTried[activeIdx+1])return;
           tryNext(activeIdx);
         });
-        dashPlayer.initialize(video,url,true);
+        dashPlayer.initialize(video,proxyUrl,true);
         player=dashPlayer;
         startPlay();
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
           showVideo();
-          if(stream._iptv){
-            url='/proxy/iptv/'+stream._iptv_id+'/';
-          }else{
-            url='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
-          }
+          var proxyUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
           var hls=new Hls({
             enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
             backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1
@@ -1310,16 +1264,43 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
             }
           });
           hls.attachMedia(video);
-          hls.loadSource(url);
+          hls.loadSource(proxyUrl);
           player=hls;
           startPlay();
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
-          showVideo();video.src=url;startPlay();
+          showVideo();video.src=rawUrl;startPlay();
         }else{
           showPlaceholder('HLS not supported in this browser');spinner.classList.add('hidden');
         }
+      }else if(isMpegts){
+        if(typeof mpegts==='undefined'){showPlaceholder('mpegts.js not loaded');spinner.classList.add('hidden');return;}
+        showVideo();
+        try{mpegts.LoggingControl.enableAll&&mpegts.LoggingControl.enableAll(false);}catch(_){}
+        var tsPlayer=mpegts.createPlayer({
+          type:'mpegts',isLive:true,url:rawUrl
+        },{
+          enableWorker:true,enableStashBuffer:true,stashInitialSize:128,
+          liveBufferLatencyChasing:true,liveBufferLatencyMaxLatency:5,
+          autoCleanupSourceBuffer:true
+        });
+        tsPlayer.attachMediaElement(video);
+        tsPlayer.load();
+        tsPlayer.play();
+        player=tsPlayer;
+        startPlay();
+      }else if(isEmbed){
+        showVideo();
+        video.style.display='none';
+        var iframe=document.createElement('iframe');
+        iframe.id='embed-frame';
+        iframe.src=rawUrl;
+        iframe.style.cssText='width:100%;height:100%;border:none';
+        iframe.setAttribute('allowfullscreen','');
+        iframe.setAttribute('sandbox','allow-scripts allow-same-origin allow-presentation allow-encrypted-media allow-forms');
+        document.getElementById('player-host').appendChild(iframe);
+        player=iframe;
       }else{
-        showVideo();video.src=url;startPlay();
+        showVideo();video.src=rawUrl;startPlay();
       }
     }catch(e){
       showPlaceholder('Error: '+e.message);
@@ -1334,29 +1315,15 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
   });
 
-  /* ---- IPTV Mapped Channels ---- */
-  var iptvServerRow=document.getElementById('iptvServerRow');
-  var iptvSectionLabel=document.getElementById('iptvSectionLabel');
-  if (iptvChannels && iptvChannels.length) {
-    var streamBase = streams.length - iptvChannels.length;
-    iptvChannels.forEach(function(ch, i) {
-      var btn=document.createElement('button');
-      btn.className='srv-btn iptv-btn';
-      btn.dataset.idx=streamBase + i;
-      btn.textContent=ch.name;
-      iptvServerRow.appendChild(btn);
+  /* Refresh button — reloads the page to fetch fresh playback data */
+  var refreshBtn=document.getElementById('btn-refresh-player');
+  if(refreshBtn){
+    refreshBtn.addEventListener('click',function(){
+      refreshBtn.textContent='⟳ Loading...';
+      refreshBtn.disabled=true;
+      window.location.reload();
     });
-    iptvServerRow.style.display='';
-    iptvSectionLabel.style.display='';
   }
-
-  /* ---- IPTV server row click ---- */
-  iptvServerRow.addEventListener('click',function(e){
-    var btn=e.target.closest('.srv-btn');
-    if(!btn)return;
-    var idx=parseInt(btn.dataset.idx);
-    if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
-  });
 
   if(streams&&streams.length>0){loadStream(0);}else{showPlaceholder('No streams available');}
 
@@ -1573,120 +1540,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       }
     })['catch'](function(){});
   })();
-
-  /* ---- IPTV Assignment Modal (per-sport) ---- */
-  var iptvModal=document.getElementById('iptvModal');
-  var iptvSearch=document.getElementById('iptvSearch');
-  var iptvChannelList=document.getElementById('iptvChannelList');
-  var iptvAssignedList=document.getElementById('iptvAssignedList');
-  var iptvStatus=document.getElementById('iptvStatus');
-  var iptvSportName=document.getElementById('iptvSportName');
-  var allIptvChannels=[];
-  var sportName=eventSport||'Sports';
-  var linkedIds=[];
-  var iptvFilterTimer=null;
-
-  function loadIptvChannels(){
-    iptvStatus.textContent='Loading channels...';
-    fetch('/api/iptv-channels').then(function(r){return r.json();}).then(function(d){
-      if(d.ok){
-        allIptvChannels=d.channels||[];
-        fetch('/api/sport-links').then(function(r){return r.json();}).then(function(ev){
-          if(ev.ok&&ev.links){
-            cur=ev.links[sportName];
-            linkedIds=Array.isArray(cur)?cur.slice():[];
-          }
-          renderIptvSport();
-        })['catch'](function(){renderIptvSport();});
-      }else{
-        iptvStatus.textContent='Failed to load channels';
-      }
-    })['catch'](function(){
-      iptvStatus.textContent='Failed to load channels';
-    });
-  }
-
-  function renderIptvSport(){
-    var q=iptvSearch.value.trim().toLowerCase();
-    var filtered=q?allIptvChannels.filter(function(c){
-      return (c.name||'').toLowerCase().includes(q)||(c.group||'').toLowerCase().includes(q);
-    }):allIptvChannels;
-    // Assigned chips
-    var assigned = allIptvChannels.filter(function(c){return linkedIds.indexOf(c.id)!==-1;});
-    iptvAssignedList.innerHTML=assigned.length?'':('<div style="padding:6px;text-align:center;color:var(--text-tertiary);font-size:12px">No channels assigned to ' + E(sportName) + '</div>');
-    assigned.forEach(function(c){
-      var chip=document.createElement('span');
-      chip.style.cssText='display:inline-flex;align-items:center;gap:4px;margin:2px;padding:3px 8px;background:rgba(168,85,247,.15);color:#a855f7;border-radius:12px;font-size:11px;cursor:pointer;white-space:nowrap';
-      chip.textContent=c.name+' ✕';
-      chip.title='Click to remove from '+sportName;
-      chip.dataset.id=c.id;
-      chip.addEventListener('click',function(){
-        toggleSportChannel(this.dataset.id);
-      });
-      iptvAssignedList.appendChild(chip);
-    });
-    // Channel list
-    if(!filtered.length){
-      iptvChannelList.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px">'+
-        (q?'No channels match "'+q+'"':'No IPTV channels available')+'</div>';
-      iptvStatus.textContent=allIptvChannels.length+' total channels';
-      return;
-    }
-    iptvChannelList.innerHTML=filtered.map(function(c){
-      var active=linkedIds.indexOf(c.id)!==-1;
-      return '<button class="iptv-list-item'+(active?' active':'')+'" data-id="'+c.id+'" style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:none;background:'+(active?'rgba(168,85,247,.12)':'transparent')+';color:'+(active?'#a855f7':'var(--text)')+';border-radius:6px;cursor:pointer;font-size:13px;text-align:left;transition:all .1s;margin:1px 0" '+
-        'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background='+(active?"'rgba(168,85,247,.12)'":"'transparent'")+'">'+
-        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(c.name||'?')+'</span>'+
-        '<span style="font-size:10px;color:var(--text-tertiary);flex-shrink:0">'+(c.group||'').slice(0,15)+'</span>'+
-        (active?'<span style="color:#a855f7;font-size:14px">✓</span>':'')+
-        '</button>';
-    }).join('');
-    iptvStatus.textContent=filtered.length+' of '+allIptvChannels.length+' channels'+(q?' matching "'+q+'"':'');
-  }
-
-  iptvSearch.addEventListener('input',function(){
-    clearTimeout(iptvFilterTimer);
-    iptvFilterTimer=setTimeout(renderIptvSport,200);
-  });
-
-  function toggleSportChannel(channelId){
-    var isLinked=linkedIds.indexOf(channelId)!==-1;
-    var method=isLinked?'DELETE':'POST';
-    fetch('/api/sport-link',{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify({sport:sportName,channel_id:channelId})})
-      .then(function(r){return r.json();}).then(function(d){
-        if(d.ok){
-          if(isLinked){
-            linkedIds=linkedIds.filter(function(id){return id!==channelId;});
-          }else{
-            linkedIds.push(channelId);
-          }
-          renderIptvSport();
-          showToast(isLinked?'IPTV removed from '+E(sportName):'IPTV added to '+E(sportName),'✓');
-          setTimeout(function(){location.reload();},500);
-        }else{
-          showToast('Error: '+(d.error||'Failed'),'✕');
-        }
-      })['catch'](function(){showToast('Failed to save','✕');});
-  }
-
-  iptvChannelList.addEventListener('click',function(e){
-    var item=e.target.closest('.iptv-list-item');
-    if(!item)return;
-    toggleSportChannel(item.dataset.id);
-  });
-
-  document.getElementById('iptvAssignBtn').addEventListener('click',function(){
-    iptvModal.classList.add('open');
-    iptvSearch.value='';
-    loadIptvChannels();
-  });
-  document.getElementById('iptvModalClose').addEventListener('click',function(){
-    iptvModal.classList.remove('open');
-  });
-  iptvModal.addEventListener('click',function(e){
-    if(e.target===iptvModal)iptvModal.classList.remove('open');
-  });
-  document.getElementById('iptvRefreshBtn').addEventListener('click',loadIptvChannels);
 
   /* ---- Improved Toast ---- */
   function showToast(msg,icon) {
