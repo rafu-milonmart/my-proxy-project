@@ -272,9 +272,8 @@ _SPORTS_KEYWORDS = [
     'rugby','volleyball','handball','badminton','table tennis','swimming',
     'athletics','cycling','darts','snooker','billiards','poker','esports',
     'derby','classic','series','tournament','championship','league','match',
-    'game','games','live','stream','hd','4k','fhd','uhd',
     'tennis channel','golf channel','olympic channel','fight network',
-    'red bull','extreme','action','adventure','outdoor','fishing',
+    'red bull','extreme','outdoor','fishing',
     'mls','afl','nrl','cfl','wnba','pba','nba tv','nhl network',
     'bein sports','sky sports main event','sky sports premier',
     'sports 18','star sports','ten sports','sony sports','super sport',
@@ -390,7 +389,7 @@ def _dedup_events(events):
             seen[key] = e
     return list(seen.values())
 
-def _validate_channel(ch, timeout=12):
+def _validate_channel(ch, timeout=6):
     start = time.time()
     target = ch['url']
     ua = ch.get('user_agent', '')
@@ -401,9 +400,7 @@ def _validate_channel(ch, timeout=12):
     http = _media_sess()
     base_url = target[:target.rfind('/') + 1]
     try:
-        if time.time() - start > timeout:
-            return ch['id'], False, 'timeout'
-        resp = http.get(target, headers=headers or None, timeout=min(8, timeout))
+        resp = http.get(target, headers=headers or None, timeout=min(5, timeout))
         if resp.status_code != 200:
             return ch['id'], False, f'status {resp.status_code}'
         ct = (resp.headers.get('content-type', '') or '').lower()
@@ -411,48 +408,58 @@ def _validate_channel(ch, timeout=12):
         if text.startswith('#EXT') or '.m3u8' in target:
             if not text.startswith('#EXT'):
                 return ch['id'], False, 'not a playlist'
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                return ch['id'], False, 'timeout'
             try:
                 _iptv_rewrite(text, ch, base_url)
             except Exception:
                 return ch['id'], False, 'rewrite failed'
-            if time.time() - start > timeout:
-                return ch['id'], False, 'timeout'
+            remaining = timeout - elapsed
             seg_url = None
             for line in text.splitlines():
                 s = line.strip()
                 if s and not s.startswith('#'):
                     seg_url = urljoin(base_url, s) if not s.startswith('http') else s
                     break
-            if seg_url:
-                remaining = max(3, timeout - (time.time() - start))
-                seg_resp = http.get(seg_url, headers=headers or None, timeout=remaining)
-                if seg_resp.status_code not in (200, 206) or len(seg_resp.content) == 0:
-                    return ch['id'], False, 'bad segment'
-            if time.time() - start > timeout:
-                return ch['id'], False, 'timeout'
-            key_match = re.search(r'#EXT-X-KEY[^:]*:.*URI="([^"]*)"', text)
-            if key_match:
-                key_url = key_match.group(1)
-                if not key_url.startswith('http'):
-                    key_url = urljoin(base_url, key_url)
-                remaining = max(3, timeout - (time.time() - start))
-                kr = http.get(key_url, headers=headers or None, timeout=remaining)
-                if kr.status_code != 200 or len(kr.content) == 0:
-                    return ch['id'], False, 'bad key'
+            if seg_url and remaining > 1.5:
+                seg_timeout = min(3, remaining)
+                try:
+                    seg_resp = http.get(seg_url, headers=headers or None, timeout=seg_timeout)
+                    if seg_resp.status_code not in (200, 206) or len(seg_resp.content) == 0:
+                        return ch['id'], False, 'bad segment'
+                except Exception:
+                    return ch['id'], False, 'seg timeout'
+                remaining2 = timeout - (time.time() - start)
+                key_match = re.search(r'#EXT-X-KEY[^:]*:.*URI="([^"]*)"', text)
+                if key_match and remaining2 > 1:
+                    key_url = key_match.group(1)
+                    if not key_url.startswith('http'):
+                        key_url = urljoin(base_url, key_url)
+                    try:
+                        kr = http.get(key_url, headers=headers or None, timeout=min(3, remaining2))
+                        if kr.status_code != 200 or len(kr.content) == 0:
+                            return ch['id'], False, 'bad key'
+                    except Exception:
+                        return ch['id'], False, 'key timeout'
         else:
-            if len(resp.content) < 1024 and ('text/html' in ct or 'text/plain' in ct):
-                return ch['id'], False, 'not video content'
+            if 'text/html' in ct or 'text/plain' in ct:
+                if len(resp.content) < 2048:
+                    return ch['id'], False, 'not video content'
     except Exception as e:
         return ch['id'], False, str(e)[:50]
     return ch['id'], True, 'ok'
 
-def _validate_all_channels(timeout=15):
-    global _excluded_iptv
+_validation_in_progress = False
+
+def _validate_all_channels(timeout=6):
+    global _excluded_iptv, _validation_in_progress
+    _validation_in_progress = True
     with _iptv_lock:
         channels = list(_IPTV_CHANNELS)
-    _log.info('Validating %d IPTV channels...', len(channels))
+    _log.info('Validating %d IPTV channels (%ds timeout, 60 workers)...', len(channels), timeout)
     results = {}
-    with ThreadPoolExecutor(max_workers=30) as pool:
+    with ThreadPoolExecutor(max_workers=60) as pool:
         fut_map = {pool.submit(_validate_channel, c, timeout): c for c in channels}
         for f in as_completed(fut_map):
             try:
@@ -469,11 +476,12 @@ def _validate_all_channels(timeout=15):
         cid = c['id']
         if cid in results and not results[cid][0]:
             _log.info('  DEAD: %s — %s', c.get('name', '?'), results[cid][1])
+    _validation_in_progress = False
 
 # Retry dead channels periodically
 def _retry_dead_loop():
     while True:
-        time.sleep(300)
+        time.sleep(120)
         try:
             with _iptv_lock:
                 dead = set(_excluded_iptv)
@@ -485,8 +493,8 @@ def _retry_dead_loop():
             if not to_retry:
                 continue
             _log.info('Retrying %d dead channels...', len(to_retry))
-            with ThreadPoolExecutor(max_workers=15) as pool:
-                fut_map = {pool.submit(_validate_channel, c, 8): c for c in to_retry}
+            with ThreadPoolExecutor(max_workers=30) as pool:
+                fut_map = {pool.submit(_validate_channel, c, 5): c for c in to_retry}
                 revived = set()
                 for f in as_completed(fut_map):
                     try:
@@ -506,9 +514,10 @@ def _retry_dead_loop():
 def _startup_validate():
     time.sleep(15)
     try:
-        _validate_all_channels(timeout=15)
+        _validate_all_channels(timeout=6)
     except Exception as e:
         _log.warning('Startup validation failed: %s', e)
+        _validation_in_progress = False
 
 threading.Thread(target=_startup_validate, daemon=True).start()
 threading.Thread(target=_retry_dead_loop, daemon=True).start()
@@ -551,7 +560,8 @@ def api_sport_link():
 @app.route('/api/iptv-channels')
 def api_iptv_channels():
     with _iptv_lock:
-        return jsonify({'ok': True, 'channels': _IPTV_CHANNELS, 'total': len(_IPTV_CHANNELS)})
+        alive = [c for c in _IPTV_CHANNELS if c['id'] not in _excluded_iptv]
+        return jsonify({'ok': True, 'channels': alive, 'total': len(_IPTV_CHANNELS), 'dead': len(_excluded_iptv), 'validating': _validation_in_progress})
 
 @app.route('/watch/<slug>')
 def watch(slug):
@@ -650,7 +660,7 @@ def _build_playlist_for_event(e, seen_slugs=None):
     if linked_ids:
         with _iptv_lock:
             for ch in _IPTV_CHANNELS:
-                if ch['id'] in linked_ids:
+                if ch['id'] in linked_ids and ch['id'] not in _excluded_iptv:
                     lines.append(f'#EXTINF:-1 tvg-id="{ch["id"]}" tvg-name="{ch["name"]}" group-title="IPTV {sport}",{ch["name"]}')
                     lines.append(request.host_url.rstrip('/') + f'/proxy/iptv/{ch["id"]}/')
     return lines
