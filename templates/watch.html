@@ -883,14 +883,22 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var activeIdx = -1;
   var fallbackTried = {};
   var retryCount = 0;
-  var maxRetries = 5;
+  var maxRetries = 3;
   var retryTimer = null;
+  var fallbackAttempts = 0;
+  var maxFallbackAttempts = 8;
   var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
   var L = function(msg) { try { console.log('[ZL]', msg); } catch(_) {} };
   L('init streams=' + (streams ? streams.length : 'null') + ' shaka=' + (typeof shaka!=='undefined') + ' hlsjs=' + (typeof Hls!=='undefined'));
   if(typeof shaka!=='undefined')shaka.polyfill.installAll();
 
   function tryNext(idx){
+    fallbackAttempts++;
+    if(fallbackAttempts>maxFallbackAttempts){
+      showPlaceholder('All streams unavailable');
+      spinner.classList.add('hidden');
+      return false;
+    }
     var next=idx+1;
     while(next<(streams||[]).length){
       if(!fallbackTried[next]){fallbackTried[next]=true;loadStream(next);return true;}
@@ -1264,7 +1272,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         var proxyUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
         var shakaPlayer=new shaka.Player();
         player=shakaPlayer;
-        var shakaCfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15},manifest:{dash:{defaultPresentationDelay:2}}};
+        var shakaCfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15}};
         if(drmKid && drmKey){
           var kid=normHex(drmKid),key=normHex(drmKey);
           var ck={};ck[kid]=key;
@@ -1364,7 +1372,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     var btn=e.target.closest('.srv-btn');
     if(!btn)return;
     var idx=parseInt(btn.dataset.idx);
-    if(!isNaN(idx)){fallbackTried={};retryCount=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
+    if(!isNaN(idx)){fallbackTried={};retryCount=0;fallbackAttempts=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
   });
 
   /* Refresh button — reloads the page to fetch fresh playback data */
