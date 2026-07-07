@@ -1153,7 +1153,10 @@ def main():
     )
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    QFontDatabase.addApplicationFont("Inter.ttf")
+    try:
+        QFontDatabase.addApplicationFont("Inter.ttf")
+    except Exception:
+        pass
     w = InstallerWindow()
     w.show()
     sys.exit(app.exec())

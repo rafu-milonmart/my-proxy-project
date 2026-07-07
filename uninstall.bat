@@ -10,7 +10,9 @@ echo.
 choice /c YN /m "Are you sure?"
 if errorlevel 2 exit /b
 
-set INSTALL_DIR=C:\Zero_live
+set INSTALL_DIR=%~dp0
+REM Strip trailing backslash
+if "%INSTALL_DIR:~-1%"=="\" set INSTALL_DIR=%INSTALL_DIR:~0,-1%
 
 REM Remove desktop shortcuts
 echo Removing desktop shortcuts...

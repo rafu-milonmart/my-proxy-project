@@ -63,11 +63,15 @@ echo Could not check for updates.
 echo(
 
 REM Start app (loop so in-app restart works)
+set BROWSER_OPENED=0
 :RESTART
-echo Starting ZeroLive...
-start /b "" http://127.0.0.1:9090
 set PORT=9090
 "%PYTHON%" app.py
+if "%BROWSER_OPENED%"=="0" (
+  set BROWSER_OPENED=1
+  timeout /t 2 /nobreak >nul
+  start /b "" http://127.0.0.1:9090
+)
 echo App exited (code !errorlevel!). Restarting in 3s...
 timeout /t 3 /nobreak >nul
 goto RESTART
