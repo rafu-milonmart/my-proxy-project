@@ -937,6 +937,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   function formatTime(s){
     if(!s||!isFinite(s))return'0:00';
+    if(isLiveStream&&s>86400)return'LIVE';
     var m=Math.floor(s/60),sec=Math.floor(s%60);
     return m+':'+(sec<10?'0':'')+sec;
   }
@@ -980,7 +981,22 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     var d=video.duration;
     if(d&&isFinite(d)){
       var ct=video.currentTime;
-          if(isLiveStream&&player&&isFinite(d)&&player.liveSyncPosition!==undefined&&player.liveSyncPosition>0){
+      if(isLiveStream&&player&&player.seekRange){
+        try{
+          var sr=player.seekRange();
+          if(sr&&isFinite(sr.end)&&sr.end>sr.start){
+            var windowSize=sr.end-sr.start;
+            var relPos=ct-sr.start;
+            if(relPos<0)relPos=0;
+            if(relPos>windowSize)relPos=windowSize;
+            progressFill.style.width=(relPos/windowSize*100)+'%';
+            currentTimeEl.textContent=formatTime(relPos);
+            totalTimeEl.textContent=formatTime(windowSize);
+            return;
+          }
+        }catch(_){}
+      }
+      if(isLiveStream&&player&&isFinite(d)&&player.liveSyncPosition!==undefined&&player.liveSyncPosition>0){
         var windowStart=player.liveSyncPosition-d;
         if(ct>windowStart)ct=ct-windowStart;
         if(ct<0)ct=0;if(ct>d)ct=d;
@@ -994,12 +1010,27 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       currentTimeEl.textContent=formatTime(video.currentTime);
     }
   });
+  function getSeekStart(){
+    if(isLiveStream&&player&&player.seekRange){
+      try{var sr=player.seekRange();if(sr&&isFinite(sr.end))return sr.start;}catch(_){}
+    }
+    return 0;
+  }
+  function getWindowSize(){
+    if(isLiveStream&&player&&player.seekRange){
+      try{var sr=player.seekRange();if(sr&&isFinite(sr.end)&&sr.end>sr.start)return sr.end-sr.start;}catch(_){}
+    }
+    return video.duration;
+  }
   video.addEventListener('progress',function(){
     if(video.buffered&&video.buffered.length){
       var b=video.buffered.end(video.buffered.length-1);
-      if(video.duration){
-        var p=(b/video.duration*100);
-        progressBuffer.style.width=p+'%';
+      var ws=getWindowSize();
+      var ss=getSeekStart();
+      if(ws&&isFinite(ws)&&ws>0){
+        var relBuf=b-ss;
+        var p=(relBuf/ws*100);
+        progressBuffer.style.width=Math.min(p,100)+'%';
       }
     }
   });
@@ -1015,7 +1046,10 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   function seek(e,el){
     var r=el.getBoundingClientRect();
     var p=(e.clientX-r.left)/r.width;
-    if(video.duration){video.currentTime=p*video.duration;}
+    var ss=getSeekStart();
+    var ws=getWindowSize();
+    if(ws&&isFinite(ws)&&ws>0){video.currentTime=ss+p*ws;}
+    else if(video.duration){video.currentTime=p*video.duration;}
   }
   progressWrap.addEventListener('mousedown',function(e){isSeeking=true;seek(e,this);});
   document.addEventListener('mouseup',function(){isSeeking=false;resetHideTimer();});
@@ -1230,13 +1264,19 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         var proxyUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
         var shakaPlayer=new shaka.Player();
         player=shakaPlayer;
+        var shakaCfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15},manifest:{dash:{defaultPresentationDelay:2}}};
         if(drmKid && drmKey){
           var kid=normHex(drmKid),key=normHex(drmKey);
           var ck={};ck[kid]=key;
-          shakaPlayer.configure({drm:{clearKeys:ck}});
+          shakaCfg.drm={clearKeys:ck};
         }
+        shakaPlayer.configure(shakaCfg);
         shakaPlayer.addEventListener('error',function(e){
           L('Shaka error: '+(e.detail||'unknown'));
+          try{
+            var st=shakaPlayer.getStats();
+            L('Shaka stats: '+(st?JSON.stringify(st):'none'));
+          }catch(_){}
           if(fallbackTried[activeIdx+1])return;
           tryNext(activeIdx);
         });
