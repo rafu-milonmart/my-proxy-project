@@ -888,29 +888,45 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var fallbackAttempts = 0;
   var maxFallbackAttempts = 8;
   var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
-  var L = function(msg) { try { console.log('[ZL]', msg); } catch(_) {} };
-  L('init streams=' + (streams ? streams.length : 'null') + ' shaka=' + (typeof shaka!=='undefined') + ' hlsjs=' + (typeof Hls!=='undefined'));
+  var L = function(msg, data) {
+    try {
+      if(data !== undefined){ console.log('[ZL]', msg, data); }
+      else { console.log('[ZL]', msg); }
+    } catch(_) {}
+  };
+  L('init streams=' + (streams ? streams.length : 'null') + ' shaka=' + (typeof shaka!=='undefined') + ' hlsjs=' + (typeof Hls!=='undefined') + ' mpegts=' + (typeof mpegts!=='undefined'));
+  if(streams&&streams.length>0){
+    L('stream[0]:', {url:streams[0].stream_url,type:streams[0].stream_type,drm_kid:streams[0].drm_kid?'present':'none',drm_key:streams[0].drm_key?'present':'none'});
+  }
   if(typeof shaka!=='undefined')shaka.polyfill.installAll();
 
   function tryNext(idx){
+    L('tryNext('+idx+') fallbackAttempts='+(fallbackAttempts+1)+'/'+maxFallbackAttempts+' retryCount='+retryCount+'/'+maxRetries);
     fallbackAttempts++;
     if(fallbackAttempts>maxFallbackAttempts){
+      L('tryNext: exhausted all fallback attempts');
       showPlaceholder('All streams unavailable');
       spinner.classList.add('hidden');
       return false;
     }
     var next=idx+1;
+    L('tryNext: scanning from idx='+next+' of '+((streams||[]).length)+' streams');
     while(next<(streams||[]).length){
-      if(!fallbackTried[next]){fallbackTried[next]=true;loadStream(next);return true;}
+      if(!fallbackTried[next]){
+        L('tryNext: trying stream '+next);
+        fallbackTried[next]=true;loadStream(next);return true;
+      }
       next++;
     }
     if(retryCount<maxRetries){
       retryCount++;
+      L('tryNext: all streams exhausted, retry '+retryCount+'/'+maxRetries+' in 10s');
       showPlaceholder('All streams unavailable · Retry '+retryCount+'/'+maxRetries+' in 10s...');
       spinner.classList.remove('hidden');
       if(retryTimer)clearTimeout(retryTimer);
-      retryTimer=setTimeout(function(){fallbackTried={};loadStream(0);},10000);
+      retryTimer=setTimeout(function(){L('tryNext: retry timer fired, restarting from 0');fallbackTried={};loadStream(0);},10000);
     }else{
+      L('tryNext: all retries exhausted');
       showPlaceholder('All streams unavailable');
       spinner.classList.add('hidden');
     }
@@ -1264,12 +1280,27 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       var isHls=(type==='hls'||(rawUrl&&rawUrl.includes('.m3u8')));
       var isMpegts=(type==='mpegts'||(rawUrl&&rawUrl.includes('.ts')));
       var isEmbed=(type==='embed');
+      L('Stream['+idx+'] type='+type+' isDash='+isDash+' isHls='+isHls+' isMpegts='+isMpegts+' isEmbed='+isEmbed+' drm='+(drmKid?'yes':'no')+' url='+(rawUrl||'').substring(0,80));
       if(type==='hls'||type==='dash')setLiveMode(true);
 
+      var shakaFallbackTimer=0;
+      function shakaFallback(){
+        if(shakaFallbackDone||Date.now()>shakaFallbackTimer){return;}
+        shakaFallbackDone=true;
+        if(!shakaTriedProxy){
+          shakaTriedProxy=true;
+          shakaUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+          L('DASH: falling back to proxy manifest: '+shakaUrl);
+          shakaPlayer.load(shakaUrl).then(function(){L('DASH: proxy succeeded');tracksReady();})['catch'](function(){L('DASH: proxy also failed');shakaFallback();});
+        }else{
+          L('DASH: giving up on this stream');
+          if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+        }
+      }
       if(isDash){
         if(typeof shaka==='undefined'){showPlaceholder('Shaka Player failed to load.');spinner.classList.add('hidden');return;}
+        L('DASH: initializing Shaka Player');
         showVideo();
-        var proxyUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
         var shakaPlayer=new shaka.Player();
         player=shakaPlayer;
         var shakaCfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15}};
@@ -1277,63 +1308,82 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           var kid=normHex(drmKid),key=normHex(drmKey);
           var ck={};ck[kid]=key;
           shakaCfg.drm={clearKeys:ck};
+          L('DASH: clearKeys configured kid='+kid+' key='+key);
         }
         shakaPlayer.configure(shakaCfg);
+        var shakaTriedProxy=false;
+        var shakaFallbackDone=false;
+        var shakaFallbackTimer=Date.now()+60000;
+        var shakaUrl=rawUrl;
+        L('DASH: trying direct URL: '+(shakaUrl||'').substring(0,80));
         shakaPlayer.addEventListener('error',function(e){
-          L('Shaka error: '+(e.detail||'unknown'));
-          try{
-            var st=shakaPlayer.getStats();
-            L('Shaka stats: '+(st?JSON.stringify(st):'none'));
-          }catch(_){}
-          if(fallbackTried[activeIdx+1])return;
-          tryNext(activeIdx);
+          L('Shaka error event: '+(e.detail||'unknown'));
+          try{var st=shakaPlayer.getStats();L('Shaka stats:',st);}catch(_){}
+          setTimeout(function(){shakaFallback();},500);
         });
-        shakaPlayer.attach(video).then(function(){
-          return shakaPlayer.load(proxyUrl);
-        }).then(function(){
+        function tracksReady(){
+          L('DASH: tracks ready');
           var tracks=shakaPlayer.getVariantTracks()||[];
-          if(tracks.length){
-            buildQualityMenu(tracks);
-            qualityGroup.style.display='inline-flex';
-          }
+          if(tracks.length){buildQualityMenu(tracks);qualityGroup.style.display='inline-flex';}
           startPlay();
+        }
+        shakaPlayer.attach(video).then(function(){
+          L('DASH: Shaka attached, loading '+shakaUrl);
+          return shakaPlayer.load(shakaUrl);
+        }).then(function(){
+          L('DASH: load succeeded');
+          tracksReady();
         })['catch'](function(err){
-          L('Shaka init error: '+(err.message||err));
-          if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+          L('Shaka load catch: '+(err.message||err));
+          shakaFallback();
         });
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
+          L('HLS: initializing Hls.js with direct URL: '+(rawUrl||'').substring(0,80));
           showVideo();
-          var hlsProxy='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/';
-          var hlsTriedDirect=false;
+          var hlsFallbackDone=false;
+          var hlsTriedProxy=false;
           var hls=new Hls({
             enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
-            backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1
+            backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,
+            liveDurationInfinity:true,lowLatencyMode:true
           });
           hls.on(Hls.Events.MANIFEST_PARSED,function(){
+            L('HLS: manifest parsed, levels='+(hls.levels?hls.levels.length:0));
             if(hls.levels)buildQualityMenu(hls.levels);
             qualityGroup.style.display='inline-flex';
             if(hls.live)setLiveMode(true);
           });
-          hls.on(Hls.Events.ERROR,function(e,data){
-            if(data.fatal){
-              if(fallbackTried[activeIdx+1])return;
-              if(!hlsTriedDirect){hlsTriedDirect=true;setTimeout(function(){hls.loadSource(rawUrl);},100);return;}
-              tryNext(activeIdx);
+          function hlsFallback(){
+            if(hlsFallbackDone){return;}
+            hlsFallbackDone=true;
+            if(!hlsTriedProxy){
+              hlsTriedProxy=true;
+              L('HLS: falling back to proxy');
+              setTimeout(function(){hls.loadSource('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/');},200);
+            }else{
+              L('HLS: both direct and proxy failed');
+              if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
             }
+          }
+          hls.on(Hls.Events.ERROR,function(e,data){
+            L('HLS error: type='+data.type+' details='+data.details+' fatal='+data.fatal);
+            if(data.fatal){hlsFallback();}
           });
           hls.attachMedia(video);
-          hls.loadSource(hlsProxy);
+          hls.loadSource(rawUrl);
           player=hls;
           startPlay();
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
+          L('HLS: using native HLS playback');
           showVideo();video.src=rawUrl;startPlay();
         }else{
           showPlaceholder('HLS not supported in this browser');spinner.classList.add('hidden');
         }
       }else if(isMpegts){
         if(typeof mpegts==='undefined'){showPlaceholder('mpegts.js not loaded');spinner.classList.add('hidden');return;}
+        L('MPEG-TS: initializing mpegts.js');
         showVideo();
         try{mpegts.LoggingControl.enableAll&&mpegts.LoggingControl.enableAll(false);}catch(_){}
         var tsPlayer=mpegts.createPlayer({
@@ -1349,6 +1399,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         player=tsPlayer;
         startPlay();
       }else if(isEmbed){
+        L('EMBED: loading iframe: '+(rawUrl||'').substring(0,80));
         showVideo();
         video.style.display='none';
         var iframe=document.createElement('iframe');
@@ -1360,6 +1411,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
         document.getElementById('player-host').appendChild(iframe);
         player=iframe;
       }else{
+        L('GENERIC: direct video src: '+(rawUrl||'').substring(0,80));
         showVideo();video.src=rawUrl;startPlay();
       }
     }catch(e){
@@ -1372,7 +1424,10 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     var btn=e.target.closest('.srv-btn');
     if(!btn)return;
     var idx=parseInt(btn.dataset.idx);
-    if(!isNaN(idx)){fallbackTried={};retryCount=0;fallbackAttempts=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);}
+    if(!isNaN(idx)){
+      L('User clicked server button idx='+idx+' resetting fallback state');
+      fallbackTried={};retryCount=0;fallbackAttempts=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);
+    }
   });
 
   /* Refresh button — reloads the page to fetch fresh playback data */

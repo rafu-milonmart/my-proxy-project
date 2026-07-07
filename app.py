@@ -2,7 +2,7 @@ import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess,
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from pathlib import Path
-from flask import Flask, send_from_directory, Response, request, jsonify, render_template
+from flask import Flask, redirect, send_from_directory, Response, request, jsonify, render_template, url_for
 from curl_cffi import requests as curl_requests
 from asgiref.wsgi import WsgiToAsgi
 
@@ -24,6 +24,7 @@ STATIC_DIR = Path(__file__).parent
 VERSION_FILE = STATIC_DIR / 'version.txt'
 DEFAULT_THEME_FILE = STATIC_DIR / 'default_theme.txt'
 GITHUB_API = 'https://api.github.com/repos/rafu-milonmart/my-proxy-project'
+CUSTOM_M3U_FILE = STATIC_DIR / 'custom_m3u.json'
 DEBUG = os.environ.get('ZL_DEBUG', '0') == '1'
 _LAUNCH_ARGS = None  # saved by __main__ for restart
 
@@ -327,7 +328,18 @@ def event_playlist_m3u(slug):
 
 @app.route('/<name>.m3u')
 def custom_playlist_m3u(name):
-    """Friendly .m3u — fuzzy match by event name / slug / sport."""
+    """Friendly .m3u — check custom name first, then fuzzy match."""
+    name_key = name.strip().lower().replace(' ', '-')
+    try:
+        data = json.loads(CUSTOM_M3U_FILE.read_text(encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    if name_key in data:
+        # exact custom name match -> redirect to playlist by slug
+        slug = data[name_key].get('slug', '')
+        if slug:
+            return redirect(url_for('event_playlist_m3u', slug=slug))
+
     events = _get_events()
     name_lower = name.lower().replace('-', ' ').replace('_', ' ')
 
@@ -357,6 +369,34 @@ def custom_playlist_m3u(name):
         lines.extend(_build_playlist_for_event(e, seen_slugs))
     return Response('\n'.join(lines), mimetype='audio/x-mpegurl')
 
+@app.route('/api/custom-m3u', methods=['GET', 'POST', 'DELETE'])
+def api_custom_m3u():
+    if request.method == 'GET':
+        try:
+            data = json.loads(CUSTOM_M3U_FILE.read_text(encoding='utf-8'))
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        names = {n: e['slug'] for n, e in data.items()}
+        return jsonify({'ok': True, 'names': names})
+    body = request.get_json(silent=True) or {}
+    name = (body.get('name') or '').strip().lower().replace(' ', '-')
+    if not name:
+        return jsonify({'ok': False, 'error': 'Name is required'}), 400
+    try:
+        data = json.loads(CUSTOM_M3U_FILE.read_text(encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    if request.method == 'POST':
+        slug = body.get('slug', '')
+        data[name] = {'slug': slug}
+        CUSTOM_M3U_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        return jsonify({'ok': True})
+    elif request.method == 'DELETE':
+        data.pop(name, None)
+        CUSTOM_M3U_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        return jsonify({'ok': True})
+    return jsonify({'ok': False, 'error': 'Method not allowed'}), 405
+
 @app.route('/api/<path:subpath>')
 def proxy_api(subpath):
     if '..' in subpath or '~' in subpath:
@@ -381,6 +421,19 @@ def _hls_rewrite(body, base_dir):
             out.append(urljoin(base_dir, s))
     return '\n'.join(out)
 
+def _proxy_fetch(url, ua, ref='', timeout=15):
+    hdrs = {'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM}
+    if ref: hdrs['Referer'] = ref
+    for _ in range(3):
+        try:
+            r = _media_sess().get(url, headers=hdrs, timeout=timeout)
+            if r.status_code == 200:
+                return r.status_code, r.content, r.headers.get('content-type', '')
+        except Exception:
+            pass
+        time.sleep(1)
+    return 0, b'', ''
+
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
     target = request.args.get('url', '')
@@ -397,25 +450,12 @@ def proxy_hls(slug, idx):
         target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
     ref = s.get('referer', '')
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    def _fetch(url):
-        req = urllib.request.Request(url, headers={
-            'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
-        })
-        if ref: req.add_header('Referer', ref)
-        try:
-            with urllib.request.urlopen(req, timeout=15) as r:
-                return r.status, r.read(), r.headers.get('Content-Type', '')
-        except Exception as e:
-            return 0, b'', str(e)
-    for attempt in range(3):
-        code, body, ct = _fetch(target)
-        if code == 200:
-            text = body.decode('utf-8', errors='replace')
-            if '.m3u8' in target or text.startswith('#EXT'):
-                return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
-            return Response(body, content_type=ct or 'application/octet-stream')
-        if attempt < 2:
-            time.sleep(1.5)
+    code, body, ct = _proxy_fetch(target, ua, ref, 15)
+    if code == 200:
+        text = body.decode('utf-8', errors='replace')
+        if '.m3u8' in target or text.startswith('#EXT'):
+            return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
+        return Response(body, content_type=ct or 'application/octet-stream')
     return jsonify({"error": "Upstream failed"}), 502
 
 @app.route('/proxy/dashseg/<slug>/<int:idx>/<path:seg_path>')
@@ -431,18 +471,11 @@ def proxy_dash_seg(slug, idx, seg_path):
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    for _ in range(3):
-        try:
-            req = urllib.request.Request(target, headers={
-                'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
-            })
-            with urllib.request.urlopen(req, timeout=10) as r:
-                body = r.read()
-                ct = r.headers.get('Content-Type', 'application/octet-stream')
-                return Response(body, content_type=ct)
-        except Exception:
-            time.sleep(0.5)
-    return jsonify({"error": "Segment failed"}), 502
+    code, body, ct = _proxy_fetch(target, ua, '', 10)
+    if code == 200:
+        return Response(body, content_type=ct or 'application/octet-stream')
+    # fallback: redirect browser directly to CDN
+    return redirect(target)
 
 @app.route('/proxy/manifest/<slug>/<int:idx>/')
 @app.route('/proxy/manifest/<slug>/<int:idx>')
@@ -461,14 +494,12 @@ def proxy_manifest(slug, idx):
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     for attempt in range(3):
         try:
-            req = urllib.request.Request(url, headers={
-                'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM,
-            })
-            with urllib.request.urlopen(req, timeout=10) as r:
-                body = r.read().decode('utf-8', errors='replace')
+            r = _media_sess().get(url, headers={'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM}, timeout=10)
+            if r.status_code == 200:
+                body = r.text
+            else:
+                raise Exception(f'HTTP {r.status_code}')
             if '.mpd' in url:
-                # Remove DRM-scheme ContentProtection (Widevine/PlayReady),
-                # but KEEP urn:mpeg:dash:mp4protection:2011 (CENC signal).
                 body = re.sub(r'<ContentProtection schemeIdUri="urn:uuid:[^"]*"[^>]*/>', '', body)
                 body = re.sub(r'<ContentProtection schemeIdUri="urn:uuid:[^"]*"[^>]*>.*?</ContentProtection>', '', body, flags=re.DOTALL)
                 if drm_kid and drm_key:
