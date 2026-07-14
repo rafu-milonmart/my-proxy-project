@@ -121,7 +121,7 @@ def _fetch_fancode():
             'team_a_logo': item.get('src', ''),
             'team_b_logo': '',
             'sport': item.get('event_category', 'Sports'),
-            'league': 'FanCode',
+            'league': item.get('event_name', '') or 'FanCode',
             'title': item.get('event_name', f'{t1} vs {t2}'),
             'status': status,
             'is_fancode': True,
