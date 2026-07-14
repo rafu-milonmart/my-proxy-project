@@ -100,6 +100,7 @@ def _fetch_fancode():
     except Exception as e:
         _log.debug('FanCode fetch failed: %s', e)
         return []
+    _bad_team = re.compile(r'^(Day \d|World Feed|Court \d|Feed \d|Coverage)', re.IGNORECASE)
     events = []
     for item in items:
         mid = item.get('match_id', '')
@@ -108,6 +109,9 @@ def _fetch_fancode():
         slug = f'fc_{mid}'
         t1 = item.get('team_1', 'TBD')
         t2 = item.get('team_2', 'TBD')
+        if _bad_team.match(str(t1)) or _bad_team.match(str(t2)):
+            t1 = item.get('event_name', t1)
+            t2 = item.get('event_name', t2)
         status = (item.get('status') or '').upper()
         stream_url = item.get('stream_url', '')
         clearkey = item.get('clearkey', '')
@@ -129,7 +133,6 @@ def _fetch_fancode():
             'fancode_language': item.get('language', ''),
         }
         if is_drm and clearkey:
-            # clearkey format: "kid:key" or just key
             parts = clearkey.split(':') if ':' in clearkey else ['', clearkey]
             ev['fancode_drm_kid'] = parts[0]
             ev['fancode_drm_key'] = parts[1]
@@ -141,14 +144,11 @@ _PB_TTL = 30
 _M3U_TTL = 30
 _FC_TTL = 60
 _TM_TTL = 60
-_BS_TTL = 60
 
 FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
 TAPMAD_SOURCE = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.json'
-BINGSTREAM_SOURCE = 'https://raw.githubusercontent.com/srhady/bingstream/refs/heads/main/playlist.json'
 _fc_cache = {}  # key -> (ts, data)
 _tm_cache = {}
-_bs_cache = {}
 
 def _fetch_tapmad():
     """Fetch TapMad events and normalize."""
@@ -169,11 +169,18 @@ def _fetch_tapmad():
         video_name = item.get('VideoName', '')
         parts = video_name.split(' vs ')
         t1 = parts[0].strip() if len(parts) > 0 else 'TBD'
-        t2 = parts[1].strip() if len(parts) > 1 else 'TBD'
+        t2 = parts[1].strip().removesuffix(' Live').strip() if len(parts) > 1 else 'TBD'
         stream_url = item.get('stream_url', '')
         status = (item.get('Status', '') or '').upper()
         if not stream_url:
             continue
+        cat = (item.get('CategoryName', '') or '').lower()
+        if 'dota' in cat or 'esport' in cat:
+            sport = 'Esports'
+        elif 'cricket' in cat:
+            sport = 'Cricket'
+        else:
+            sport = 'Sports'
         ev = {
             'id': f'tm_{mid}',
             'enc_parent': f'tm_{mid}',
@@ -182,9 +189,9 @@ def _fetch_tapmad():
             'team_b_name': t2,
             'team_a_logo': item.get('ThumbnailStandard', ''),
             'team_b_logo': '',
-            'sport': 'Cricket',
+            'sport': sport,
             'league': item.get('CategoryName', 'Tapmad'),
-            'title': video_name,
+            'title': f'{t1} vs {t2}',
             'status': status,
             'is_tapmad': True,
             'streams': [
@@ -192,72 +199,11 @@ def _fetch_tapmad():
                     'source': 'TapMad',
                     'stream_url': stream_url,
                     'stream_type': 'hls',
-                    'referer': '',
-                    'user_agent': '',
-                    'needs_proxy': False,
+                    'referer': 'https://www.tapmad.com/',
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    'needs_proxy': True,
                 }
             ],
-        }
-        events.append(ev)
-    return events
-
-
-def _fetch_bingstream():
-    """Fetch BingStream events and normalize."""
-    try:
-        raw = urllib.request.urlopen(BINGSTREAM_SOURCE, timeout=10).read().decode('utf-8')
-        data = json.loads(raw)
-        items = data.get('channels', []) if isinstance(data, dict) else []
-        if not items:
-            return []
-    except Exception as e:
-        _log.debug('BingStream fetch failed: %s', e)
-        return []
-    events = []
-    for item in items:
-        t1 = item.get('Team 1 Name', '').strip()
-        t2 = item.get('Team 2 Name', '').strip()
-        if not t1 or not t2:
-            continue
-        raw_streams = item.get('Stream URL', [])
-        if not raw_streams or not isinstance(raw_streams, list):
-            continue
-        status = (item.get('Match Status', '') or '').upper()
-        referer = item.get('Referer', '')
-        ua = item.get('User-Agent', '')
-        slug_src = f'{t1}|{t2}|{item.get("Category", "")}'
-        slug_hash = hashlib.md5(slug_src.encode()).hexdigest()[:12]
-        slug = f'bs_{slug_hash}'
-        streams = []
-        for srv in raw_streams:
-            play_url = srv.get('play_url', '')
-            if not play_url:
-                continue
-            streams.append({
-                'source': 'BingStream',
-                'stream_url': play_url,
-                'stream_type': 'hls',
-                'referer': referer,
-                'user_agent': ua,
-                'needs_proxy': True,
-                'server_name': srv.get('server_name', ''),
-            })
-        if not streams:
-            continue
-        ev = {
-            'id': slug,
-            'enc_parent': slug,
-            'parent': slug,
-            'team_a_name': t1,
-            'team_b_name': t2,
-            'team_a_logo': item.get('Team 1 Logo', ''),
-            'team_b_logo': item.get('Team 2 Logo', ''),
-            'sport': item.get('Category', 'Sports'),
-            'league': item.get('League', ''),
-            'title': item.get('Match Title', f'{t1} vs {t2}'),
-            'status': status,
-            'is_bingstream': True,
-            'streams': streams,
         }
         events.append(ev)
     return events
@@ -285,15 +231,27 @@ def _teams_match(a1, b1, a2, b2):
 
 def _dedup_merge(all_events):
     merged = {}
+    merged_keys = list(merged.keys())
     for ev in all_events:
         key = _make_dedup_key(ev.get('team_a_name'), ev.get('team_b_name'))
         if not key:
             merged[ev.get('id', str(id(ev)))] = ev
             continue
-        if key not in merged:
+        matched_key = None
+        if key in merged:
+            matched_key = key
+        else:
+            for mk, mev in merged.items():
+                if _teams_match(
+                    ev.get('team_a_name', ''), ev.get('team_b_name', ''),
+                    mev.get('team_a_name', ''), mev.get('team_b_name', '')
+                ):
+                    matched_key = mk
+                    break
+        if matched_key is None:
             merged[key] = ev
         else:
-            existing = merged[key]
+            existing = merged[matched_key]
             existing_streams = existing.get('streams', [])
             new_streams = ev.get('streams', [])
             if existing_streams and new_streams:
@@ -306,7 +264,7 @@ def _dedup_merge(all_events):
                 existing['team_a_logo'] = ev['team_a_logo']
             if not existing.get('team_b_logo') and ev.get('team_b_logo'):
                 existing['team_b_logo'] = ev['team_b_logo']
-            for flag in ('is_fancode', 'is_tapmad', 'is_bingstream'):
+            for flag in ('is_fancode', 'is_tapmad'):
                 if ev.get(flag):
                     existing[flag] = True
     return list(merged.values())
@@ -343,7 +301,7 @@ def _pb_cached(slug):
         return []
     # Resolve upstream streams for non-new-source events
     upstream_streams = []
-    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad') or ev.get('is_bingstream')
+    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad')
     if not is_new_source:
         try:
             servers = _fetch_playback(slug)
@@ -363,7 +321,7 @@ def _pb_cached(slug):
                 s['drm_kid'] = ev['fancode_drm_kid']
                 s['drm_key'] = ev['fancode_drm_key']
             fc_streams = [s]
-    # Extra streams from merge (TapMad, BingStream)
+    # Extra streams from merge (TapMad)
     extra_streams = ev.get('streams', [])
     streams = upstream_streams + fc_streams + extra_streams
     if streams:
@@ -485,8 +443,7 @@ def _get_events():
     upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
     fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
     tm = _cached('tapmad', _TM_TTL, _fetch_tapmad, _tm_cache)
-    bs = _cached('bingstream', _BS_TTL, _fetch_bingstream, _bs_cache)
-    all_events = (upstream or []) + (fc or []) + (tm or []) + (bs or [])
+    all_events = (upstream or []) + (fc or []) + (tm or [])
     return _dedup_merge(all_events)
 
 @app.route('/watch/<slug>')
@@ -654,7 +611,7 @@ def api_custom_m3u():
 
 @app.route('/api/events')
 def api_events():
-    """Return all events (upstream + FanCode + TapMad + BingStream) merged and deduped."""
+    """Return all events (upstream + FanCode + TapMad) merged and deduped."""
     return jsonify({'ok': True, 'events': _get_events()})
 
 @app.route('/api/<path:subpath>')
