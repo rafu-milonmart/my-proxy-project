@@ -1453,8 +1453,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var matchHeader=document.getElementById('matchHeader');
   var eventTime=document.getElementById('eventTime');
   {% if event %}
-  var startsAt={{ event.starts_at | tojson }};
-  var isLiveFlag={{ event.is_live | tojson }};
+  var startsAt={{ (event.starts_at or '') | tojson }};
+  var isLiveFlag={{ (event.is_live or 0) | tojson }};
   if(startsAt){
     function updateTimeDisplay(){
       var now=Date.now();
