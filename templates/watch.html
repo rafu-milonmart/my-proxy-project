@@ -814,6 +814,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <div class="match-meta">
         {% if event.league %}<div class="league">{{ event.league }}</div>{% endif %}
         {% if event.is_fancode %}<span style="display:inline-block;background:#9333ea;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.5px;margin-top:4px">FANCODE</span>{% endif %}
+        {% if event.is_tapmad %}<span style="display:inline-block;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.5px;margin-top:4px">TAPMAD</span>{% endif %}
+        {% if event.is_bingstream %}<span style="display:inline-block;background:#2563eb;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.5px;margin-top:4px">BINGSTREAM</span>{% endif %}
         {% if event.starts_at %}<div class="time" id="eventTime"></div>{% endif %}
       </div>
     </div>
@@ -841,7 +843,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       </div>
     <div class="row" id="serverRow">
       {% for s in streams %}
-      <button class="srv-btn" data-idx="{{ loop.index0 }}">LIVE {{ loop.index }}</button>
+      <button class="srv-btn" data-idx="{{ loop.index0 }}">LIVE {{ loop.index }}{% if s.source %} <span style="font-size:8px;opacity:.7;font-weight:400">{{ s.source }}</span>{% endif %}</button>
       {% endfor %}
     </div>
   </div>
@@ -1345,9 +1347,12 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           var hlsFallbackDone=false;
           var hlsTriedProxy=false;
           var hlsUrl;
-          if(isFancode){
+          var needsProxy=isFancode||(stream&&stream.needs_proxy);
+          if(needsProxy){
+            hlsTriedProxy=true;
             hlsUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
-            L('HLS: FanCode stream, using proxy+rewrite: '+hlsUrl);
+            if(stream&&stream.referer)hlsUrl+='&referer='+encodeURIComponent(stream.referer);
+            L('HLS: proxy stream, using proxy+rewrite: '+hlsUrl);
           }else{
             hlsUrl=rawUrl;
             L('HLS: initializing Hls.js with direct URL: '+(rawUrl||'').substring(0,80));
@@ -1373,7 +1378,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
               if(!hlsTriedProxy){
                 hlsTriedProxy=true;
                 L('HLS: falling back to proxy');
-                setTimeout(function(){hlsInit('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+(isFancode?'/?rewrite=1':'/'));},200);
+                var fbUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
+                if(stream&&stream.referer)fbUrl+='&referer='+encodeURIComponent(stream.referer);
+                setTimeout(function(){hlsInit(fbUrl);},200);
               }else{
                 L('HLS: both direct and proxy failed');
                 if(!fallbackTried[activeIdx+1])tryNext(activeIdx);

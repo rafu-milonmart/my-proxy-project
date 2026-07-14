@@ -140,9 +140,177 @@ _EV_TTL = 15
 _PB_TTL = 30
 _M3U_TTL = 30
 _FC_TTL = 60
+_TM_TTL = 60
+_BS_TTL = 60
 
 FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
+TAPMAD_SOURCE = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.json'
+BINGSTREAM_SOURCE = 'https://raw.githubusercontent.com/srhady/bingstream/refs/heads/main/playlist.json'
 _fc_cache = {}  # key -> (ts, data)
+_tm_cache = {}
+_bs_cache = {}
+
+def _fetch_tapmad():
+    """Fetch TapMad events and normalize."""
+    try:
+        raw = urllib.request.urlopen(TAPMAD_SOURCE, timeout=10).read().decode('utf-8')
+        data = json.loads(raw)
+        items = data.get('Matches', []) if isinstance(data, dict) else []
+        if not items:
+            return []
+    except Exception as e:
+        _log.debug('TapMad fetch failed: %s', e)
+        return []
+    events = []
+    for item in items:
+        mid = str(item.get('EntityId', ''))
+        if not mid:
+            continue
+        video_name = item.get('VideoName', '')
+        parts = video_name.split(' vs ')
+        t1 = parts[0].strip() if len(parts) > 0 else 'TBD'
+        t2 = parts[1].strip() if len(parts) > 1 else 'TBD'
+        stream_url = item.get('stream_url', '')
+        status = (item.get('Status', '') or '').upper()
+        if not stream_url:
+            continue
+        ev = {
+            'id': f'tm_{mid}',
+            'enc_parent': f'tm_{mid}',
+            'parent': f'tm_{mid}',
+            'team_a_name': t1,
+            'team_b_name': t2,
+            'team_a_logo': item.get('ThumbnailStandard', ''),
+            'team_b_logo': '',
+            'sport': 'Cricket',
+            'league': item.get('CategoryName', 'Tapmad'),
+            'title': video_name,
+            'status': status,
+            'is_tapmad': True,
+            'streams': [
+                {
+                    'source': 'TapMad',
+                    'stream_url': stream_url,
+                    'stream_type': 'hls',
+                    'referer': '',
+                    'user_agent': '',
+                    'needs_proxy': False,
+                }
+            ],
+        }
+        events.append(ev)
+    return events
+
+
+def _fetch_bingstream():
+    """Fetch BingStream events and normalize."""
+    try:
+        raw = urllib.request.urlopen(BINGSTREAM_SOURCE, timeout=10).read().decode('utf-8')
+        data = json.loads(raw)
+        items = data.get('channels', []) if isinstance(data, dict) else []
+        if not items:
+            return []
+    except Exception as e:
+        _log.debug('BingStream fetch failed: %s', e)
+        return []
+    events = []
+    for item in items:
+        t1 = item.get('Team 1 Name', '').strip()
+        t2 = item.get('Team 2 Name', '').strip()
+        if not t1 or not t2:
+            continue
+        raw_streams = item.get('Stream URL', [])
+        if not raw_streams or not isinstance(raw_streams, list):
+            continue
+        status = (item.get('Match Status', '') or '').upper()
+        referer = item.get('Referer', '')
+        ua = item.get('User-Agent', '')
+        slug_src = f'{t1}|{t2}|{item.get("Category", "")}'
+        slug_hash = hashlib.md5(slug_src.encode()).hexdigest()[:12]
+        slug = f'bs_{slug_hash}'
+        streams = []
+        for srv in raw_streams:
+            play_url = srv.get('play_url', '')
+            if not play_url:
+                continue
+            streams.append({
+                'source': 'BingStream',
+                'stream_url': play_url,
+                'stream_type': 'hls',
+                'referer': referer,
+                'user_agent': ua,
+                'needs_proxy': True,
+                'server_name': srv.get('server_name', ''),
+            })
+        if not streams:
+            continue
+        ev = {
+            'id': slug,
+            'enc_parent': slug,
+            'parent': slug,
+            'team_a_name': t1,
+            'team_b_name': t2,
+            'team_a_logo': item.get('Team 1 Logo', ''),
+            'team_b_logo': item.get('Team 2 Logo', ''),
+            'sport': item.get('Category', 'Sports'),
+            'league': item.get('League', ''),
+            'title': item.get('Match Title', f'{t1} vs {t2}'),
+            'status': status,
+            'is_bingstream': True,
+            'streams': streams,
+        }
+        events.append(ev)
+    return events
+
+
+def _make_dedup_key(team_a, team_b):
+    a = (team_a or '').lower().strip()
+    b = (team_b or '').lower().strip()
+    if not a or not b:
+        return None
+    return '|'.join(sorted([a, b]))
+
+
+def _teams_match(a1, b1, a2, b2):
+    a1l, b1l = a1.lower().strip(), b1.lower().strip()
+    a2l, b2l = a2.lower().strip(), b2.lower().strip()
+    if sorted([a1l, b1l]) == sorted([a2l, b2l]):
+        return True
+    if (a1l in a2l or a2l in a1l) and (b1l in b2l or b2l in b1l):
+        return True
+    if (a1l in b2l or b2l in a1l) and (b1l in a2l or a2l in b1l):
+        return True
+    return False
+
+
+def _dedup_merge(all_events):
+    merged = {}
+    for ev in all_events:
+        key = _make_dedup_key(ev.get('team_a_name'), ev.get('team_b_name'))
+        if not key:
+            merged[ev.get('id', str(id(ev)))] = ev
+            continue
+        if key not in merged:
+            merged[key] = ev
+        else:
+            existing = merged[key]
+            existing_streams = existing.get('streams', [])
+            new_streams = ev.get('streams', [])
+            if existing_streams and new_streams:
+                existing['streams'] = existing_streams + new_streams
+            elif new_streams:
+                existing['streams'] = new_streams
+            if (ev.get('status', '').upper() == 'LIVE'):
+                existing['status'] = 'LIVE'
+            if not existing.get('team_a_logo') and ev.get('team_a_logo'):
+                existing['team_a_logo'] = ev['team_a_logo']
+            if not existing.get('team_b_logo') and ev.get('team_b_logo'):
+                existing['team_b_logo'] = ev['team_b_logo']
+            for flag in ('is_fancode', 'is_tapmad', 'is_bingstream'):
+                if ev.get(flag):
+                    existing[flag] = True
+    return list(merged.values())
+
 
 def _cached(key, ttl, fetcher, store=None):
     """Atomic cache get-or-set. No locks — cheap dict read wins."""
@@ -165,35 +333,42 @@ def _pb_cached(slug):
     hit = _pb_cache.get(slug)
     if hit and now - hit[0] < _PB_TTL:
         return hit[1]
-    # FanCode events: synthetic stream from direct HLS URL
-    if slug.startswith('fc_'):
-        ev = None
-        for e in _get_events():
-            if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
-                ev = e
-                break
-        if ev and ev.get('is_fancode'):
-            stream_url = ev.get('fancode_stream_url', '')
-            if stream_url:
-                s = {'stream_url': stream_url, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''}
-                if ev.get('fancode_drm_kid'):
-                    s['drm_kid'] = ev['fancode_drm_kid']
-                    s['drm_key'] = ev['fancode_drm_key']
-                streams = [s]
-                _pb_cache[slug] = (time.time(), streams)
-                return streams
+    # Find event by slug
+    ev = None
+    for e in _get_events():
+        if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
+            ev = e
+            break
+    if not ev:
         return []
-    try:
-        servers = _fetch_playback(slug)
-        streams = []
-        if servers:
-            r = _decrypt(servers[0]['enc'], str(servers[0]['bucket']))
-            if r and 'streams' in r:
-                streams = r['streams']
-        _pb_cache[slug] = (time.time(), streams)
-        return streams
-    except Exception:
-        return hit[1] if hit else []
+    # Resolve upstream streams for non-new-source events
+    upstream_streams = []
+    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad') or ev.get('is_bingstream')
+    if not is_new_source:
+        try:
+            servers = _fetch_playback(slug)
+            if servers:
+                r = _decrypt(servers[0]['enc'], str(servers[0]['bucket']))
+                if r and 'streams' in r:
+                    upstream_streams = r['streams']
+        except Exception:
+            pass
+    # FanCode: synthetic stream from direct HLS URL
+    fc_streams = []
+    if ev.get('is_fancode'):
+        stream_url = ev.get('fancode_stream_url', '')
+        if stream_url:
+            s = {'stream_url': stream_url, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': '', 'source': 'FanCode', 'needs_proxy': True}
+            if ev.get('fancode_drm_kid'):
+                s['drm_kid'] = ev['fancode_drm_kid']
+                s['drm_key'] = ev['fancode_drm_key']
+            fc_streams = [s]
+    # Extra streams from merge (TapMad, BingStream)
+    extra_streams = ev.get('streams', [])
+    streams = upstream_streams + fc_streams + extra_streams
+    if streams:
+        _pb_cache[slug] = (now, streams)
+    return streams
 
 # ---------------------------------------------------------------------------
 # HTTP helpers
@@ -309,7 +484,10 @@ def _fetch_events():
 def _get_events():
     upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
     fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
-    return (upstream or []) + (fc or [])
+    tm = _cached('tapmad', _TM_TTL, _fetch_tapmad, _tm_cache)
+    bs = _cached('bingstream', _BS_TTL, _fetch_bingstream, _bs_cache)
+    all_events = (upstream or []) + (fc or []) + (tm or []) + (bs or [])
+    return _dedup_merge(all_events)
 
 @app.route('/watch/<slug>')
 def watch(slug):
@@ -476,7 +654,7 @@ def api_custom_m3u():
 
 @app.route('/api/events')
 def api_events():
-    """Return all events (upstream + FanCode) merged."""
+    """Return all events (upstream + FanCode + TapMad + BingStream) merged and deduped."""
     return jsonify({'ok': True, 'events': _get_events()})
 
 @app.route('/api/<path:subpath>')
@@ -503,25 +681,26 @@ def _hls_rewrite(body, base_dir):
             out.append(urljoin(base_dir, s))
     return '\n'.join(out)
 
-def _hls_rewrite_proxy(body, base_url, slug, idx):
+def _hls_rewrite_proxy(body, base_url, slug, idx, referer=''):
     """Rewrite m3u8 so all sub-playlists and segments go through our proxy."""
     lines = body.split('\n')
     out = []
     base_dir = base_url[:base_url.rfind('/') + 1]
     prefix = f'/proxy/hls/{slug}/{idx}/'
+    ref_qs = ('&referer=' + url_quote(referer, safe='')) if referer else ''
     for line in lines:
         s = line.strip()
         if not s:
             out.append(line)
         elif s[0] == '#':
-            def _rewrite_uri(m, _base=base_dir, _pfx=prefix):
+            def _rewrite_uri(m, _base=base_dir, _pfx=prefix, _refqs=ref_qs):
                 raw = m.group(1) or m.group(2)
                 abs_url = urljoin(_base, raw)
-                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1"'
+                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + _refqs + '"'
             out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', _rewrite_uri, line))
         else:
             abs_url = urljoin(base_dir, s)
-            out.append(prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1')
+            out.append(prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + ref_qs)
     return '\n'.join(out)
 
 def _proxy_fetch(url, ua, ref='', timeout=15):
@@ -552,14 +731,14 @@ def proxy_hls(slug, idx):
     p = urlparse(target)
     if not p.netloc:
         target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
-    ref = s.get('referer', '')
-    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ref = request.args.get('referer', '') or s.get('referer', '')
+    ua = request.args.get('user_agent', '') or s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     code, body, ct = _proxy_fetch(target, ua, ref, 15)
     if code == 200:
         text = body.decode('utf-8', errors='replace')
         if '.m3u8' in target or text.startswith('#EXT'):
             if rewrite:
-                return Response(_hls_rewrite_proxy(text, target, slug, idx), content_type='application/vnd.apple.mpegurl')
+                return Response(_hls_rewrite_proxy(text, target, slug, idx, ref), content_type='application/vnd.apple.mpegurl')
             return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
         return Response(body, content_type=ct or 'application/octet-stream')
     return jsonify({"error": "Upstream failed"}), 502
