@@ -141,11 +141,14 @@ _PB_TTL = 30
 _M3U_TTL = 30
 _FC_TTL = 60
 _TM_TTL = 60
+_CRICHD_TTL = 60
 
 FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
 TAPMAD_SOURCE = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.json'
+CRICHD_SOURCE = 'https://raw.githubusercontent.com/srhady/crichd-speical-live-event/refs/heads/main/Live_Events.json'
 _fc_cache = {}  # key -> (ts, data)
 _tm_cache = {}
+_crichd_cache = {}
 
 def _fetch_tapmad():
     """Fetch TapMad events and normalize."""
@@ -206,6 +209,65 @@ def _fetch_tapmad():
     return events
 
 
+def _fetch_crichd():
+    """Fetch CrichD events and normalize into event format with embed streams."""
+    try:
+        raw = urllib.request.urlopen(CRICHD_SOURCE, timeout=10).read().decode('utf-8')
+        data = json.loads(raw)
+        items = data.get('matches', []) if isinstance(data, dict) else []
+        if not items:
+            return []
+    except Exception as e:
+        _log.debug('CrichD fetch failed: %s', e)
+        return []
+    events = []
+    for item in items:
+        match_name = item.get('match name', '')
+        if not match_name:
+            continue
+        parts = match_name.split(' vs ')
+        t1 = parts[0].strip() if len(parts) > 0 else 'TBD'
+        t2 = parts[1].strip() if len(parts) > 1 else 'TBD'
+        channels = item.get('Channels', [])
+        if not channels:
+            continue
+        mid = f"cr_{item.get('Tour/Group name', '')}_{match_name}"
+        slug = re.sub(r'[^a-z0-9]+', '_', mid.lower()).strip('_')
+        streams = []
+        for ch in channels:
+            embed_url = ch.get('Embed link', '')
+            if not embed_url:
+                continue
+            streams.append({
+                'source': f"CrichD · {ch.get('Channel name', '')}",
+                'stream_url': embed_url,
+                'stream_type': 'embed',
+                'referer': item.get('referer', ''),
+                'user_agent': item.get('User agent', ''),
+                'needs_proxy': False,
+            })
+        if not streams:
+            continue
+        status = (item.get('Status', '') or '').upper()
+        ev = {
+            'id': slug,
+            'enc_parent': slug,
+            'parent': slug,
+            'team_a_name': t1,
+            'team_b_name': t2,
+            'team_a_logo': '',
+            'team_b_logo': '',
+            'sport': item.get('Category', 'Sports'),
+            'league': item.get('Tour/Group name', 'CrichD'),
+            'title': match_name,
+            'status': status,
+            'is_crichd': True,
+            'streams': streams,
+        }
+        events.append(ev)
+    return events
+
+
 def _make_dedup_key(team_a, team_b):
     a = (team_a or '').lower().strip()
     b = (team_b or '').lower().strip()
@@ -261,9 +323,19 @@ def _dedup_merge(all_events):
                 existing['team_a_logo'] = ev['team_a_logo']
             if not existing.get('team_b_logo') and ev.get('team_b_logo'):
                 existing['team_b_logo'] = ev['team_b_logo']
-            for flag in ('is_fancode', 'is_tapmad'):
+            for flag in ('is_fancode', 'is_tapmad', 'is_crichd'):
                 if ev.get(flag):
                     existing[flag] = True
+            # If upstream event merged into a new-source event, swap key to
+            # upstream slug so _pb_cached() can resolve upstream streams.
+            is_upstream_merge = (not ev.get('is_fancode') and not ev.get('is_tapmad') and not ev.get('is_crichd'))
+            if is_upstream_merge and matched_key != key:
+                ev_id = ev.get('enc_parent') or ev.get('parent') or ev.get('id')
+                if ev_id and ev_id != matched_key:
+                    del merged[matched_key]
+                    existing['enc_parent'] = ev.get('enc_parent', ev_id)
+                    existing['parent'] = ev.get('parent', ev_id)
+                    merged[key] = existing
     return list(merged.values())
 
 
@@ -296,18 +368,17 @@ def _pb_cached(slug):
             break
     if not ev:
         return []
-    # Resolve upstream streams for non-new-source events
+    # Always try upstream stream resolution (fails safely for non-upstream slugs)
     upstream_streams = []
-    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad')
-    if not is_new_source:
-        try:
-            servers = _fetch_playback(slug)
-            if servers:
-                r = _decrypt(servers[0]['enc'], str(servers[0]['bucket']))
-                if r and 'streams' in r:
-                    upstream_streams = r['streams']
-        except Exception:
-            pass
+    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad') or ev.get('is_crichd')
+    try:
+        servers = _fetch_playback(slug)
+        if servers:
+            r = _decrypt(servers[0]['enc'], str(servers[0]['bucket']))
+            if r and 'streams' in r:
+                upstream_streams = r['streams']
+    except Exception:
+        pass
     # FanCode: synthetic stream from direct HLS URL
     fc_streams = []
     if ev.get('is_fancode'):
@@ -440,7 +511,8 @@ def _get_events():
     upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
     fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
     tm = _cached('tapmad', _TM_TTL, _fetch_tapmad, _tm_cache)
-    all_events = (upstream or []) + (fc or []) + (tm or [])
+    cr = _cached('crichd', _CRICHD_TTL, _fetch_crichd, _crichd_cache)
+    all_events = (upstream or []) + (fc or []) + (tm or []) + (cr or [])
     return _dedup_merge(all_events)
 
 @app.route('/watch/<slug>')
