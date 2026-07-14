@@ -70,9 +70,6 @@ _http_headers = {
 }
 _media_headers = {
     "Accept": "*/*",
-    "Origin": UPSTREAM,
-    "X-Requested-With": "lsp",
-    "X-LSP-Enc": "1",
 }
 
 # ---------------------------------------------------------------------------
@@ -660,17 +657,19 @@ def _hls_rewrite_proxy(body, base_url, slug, idx, referer=''):
             out.append(prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + ref_qs)
     return '\n'.join(out)
 
-def _proxy_fetch(url, ua, ref='', timeout=15):
-    hdrs = {'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM}
+def _proxy_fetch(url, ua, ref='', timeout=10):
+    hdrs = {'User-Agent': ua, 'Accept': '*/*'}
     if ref: hdrs['Referer'] = ref
-    for _ in range(3):
+    for attempt in range(3):
         try:
             r = _media_sess().get(url, headers=hdrs, timeout=timeout)
             if r.status_code == 200:
                 return r.status_code, r.content, r.headers.get('content-type', '')
-        except Exception:
-            pass
-        time.sleep(1)
+            _log.debug('proxy_fetch attempt %d: %s -> HTTP %d', attempt+1, url[:80], r.status_code)
+        except Exception as e:
+            _log.debug('proxy_fetch attempt %d: %s -> %s', attempt+1, url[:80], e)
+        if attempt < 2:
+            time.sleep(0.5)
     return 0, b'', ''
 
 @app.route('/proxy/hls/<slug>/<int:idx>/')
@@ -736,10 +735,11 @@ def proxy_manifest(slug, idx):
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     for attempt in range(3):
         try:
-            r = _media_sess().get(url, headers={'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM}, timeout=10)
+            r = _media_sess().get(url, headers={'User-Agent': ua, 'Accept': '*/*'}, timeout=10)
             if r.status_code == 200:
                 body = r.text
             else:
+                _log.debug('proxy_manifest attempt %d: %s -> HTTP %d', attempt+1, url[:80], r.status_code)
                 raise Exception(f'HTTP {r.status_code}')
             if '.mpd' in url:
                 body = re.sub(r'<ContentProtection schemeIdUri="urn:uuid:[^"]*"[^>]*/>', '', body)
