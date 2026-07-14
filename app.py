@@ -89,9 +89,52 @@ def _clean_url(url):
         return url[:url.index('|')]
     return url
 
+def _fetch_fancode():
+    """Fetch FanCode events and normalize into upstream event format."""
+    try:
+        raw = urllib.request.urlopen(FC_SOURCE, timeout=10).read().decode('utf-8')
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            return []
+    except Exception as e:
+        _log.debug('FanCode fetch failed: %s', e)
+        return []
+    events = []
+    for item in items:
+        mid = item.get('match_id', '')
+        if not mid:
+            continue
+        slug = f'fc_{mid}'
+        t1 = item.get('team_1', 'TBD')
+        t2 = item.get('team_2', 'TBD')
+        status = (item.get('status') or '').upper()
+        hls_bd = item.get('fancode_bd', '')
+        hls_in = item.get('fancode_in', '')
+        events.append({
+            'id': slug,
+            'enc_parent': slug,
+            'parent': slug,
+            'team_a_name': t1,
+            'team_b_name': t2,
+            'team_a_logo': item.get('team_1_logo', ''),
+            'team_b_logo': item.get('team_2_logo', ''),
+            'sport': item.get('event_category', 'Sports'),
+            'league': 'FanCode',
+            'title': item.get('event_name', f'{t1} vs {t2}'),
+            'status': status,
+            'is_fancode': True,
+            'fancode_bd': hls_bd,
+            'fancode_in': hls_in,
+        })
+    return events
+
 _EV_TTL = 15
 _PB_TTL = 30
 _M3U_TTL = 30
+_FC_TTL = 60
+
+FC_SOURCE = 'https://raw.githubusercontent.com/sm-monirulislam/FanCode-Auto-Update-Playlist/refs/heads/main/FanCode_data.json'
+_fc_cache = {}  # key -> (ts, data)
 
 def _cached(key, ttl, fetcher, store=None):
     """Atomic cache get-or-set. No locks — cheap dict read wins."""
@@ -114,6 +157,25 @@ def _pb_cached(slug):
     hit = _pb_cache.get(slug)
     if hit and now - hit[0] < _PB_TTL:
         return hit[1]
+    # FanCode events: synthetic stream from direct HLS URL
+    if slug.startswith('fc_'):
+        ev = None
+        for e in _get_events():
+            if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
+                ev = e
+                break
+        if ev and ev.get('is_fancode'):
+            streams = []
+            bd = ev.get('fancode_bd', '')
+            ind = ev.get('fancode_in', '')
+            if bd:
+                streams.append({'stream_url': bd, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''})
+            if ind:
+                streams.append({'stream_url': ind, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''})
+            if streams:
+                _pb_cache[slug] = (time.time(), streams)
+                return streams
+        return []
     try:
         servers = _fetch_playback(slug)
         streams = []
@@ -186,6 +248,12 @@ def _decrypt(enc_b64, bucket):
         return None
 
 def _resolve_one(slug):
+    # FanCode: direct HLS URL, no decryption needed
+    if slug.startswith('fc_'):
+        for e in _get_events():
+            if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
+                return e.get('fancode_bd') or e.get('fancode_in') or None
+        return None
     streams = _pb_cached(slug)
     for s in streams:
         u = _clean_url(s.get('stream_url', ''))
@@ -232,7 +300,9 @@ def _fetch_events():
     return json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or []
 
 def _get_events():
-    return _cached('events', _EV_TTL, _fetch_events, _ev_cache)
+    upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
+    fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
+    return (upstream or []) + (fc or [])
 
 @app.route('/watch/<slug>')
 def watch(slug):
@@ -304,7 +374,7 @@ def _build_playlist_for_event(e, seen_slugs=None):
     streams = _pb_cached(slug)
     t = f"{e.get('team_a_name', '?')} vs {e.get('team_b_name', '?')}"
     for i, s in enumerate(streams):
-        u = s.get('stream_url', '')
+        u = _clean_url(s.get('stream_url', ''))
         if u:
             lines.append(f'#EXTINF:-1 tvg-id="{slug}" tvg-name="{t} LIVE {i+1}",{t} LIVE {i+1}')
             lines.append(u)
@@ -396,6 +466,11 @@ def api_custom_m3u():
         CUSTOM_M3U_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
         return jsonify({'ok': True})
     return jsonify({'ok': False, 'error': 'Method not allowed'}), 405
+
+@app.route('/api/events')
+def api_events():
+    """Return all events (upstream + FanCode) merged."""
+    return jsonify({'ok': True, 'events': _get_events()})
 
 @app.route('/api/<path:subpath>')
 def proxy_api(subpath):
@@ -506,7 +581,7 @@ def proxy_manifest(slug, idx):
                     body = body.replace(
                         '</AdaptationSet>',
                         '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>\n</AdaptationSet>',
-                        1)
+                        0)
             _manifest_cache[key] = (time.time(), body)
             return Response(body, content_type='application/dash+xml')
         except Exception:

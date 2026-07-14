@@ -813,6 +813,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       <div class="vs">VS</div>
       <div class="match-meta">
         {% if event.league %}<div class="league">{{ event.league }}</div>{% endif %}
+        {% if event.is_fancode %}<span style="display:inline-block;background:#9333ea;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.5px;margin-top:4px">FANCODE</span>{% endif %}
         {% if event.starts_at %}<div class="time" id="eventTime"></div>{% endif %}
       </div>
     </div>
@@ -881,6 +882,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var slug = '{{ slug }}';
   var player = null;
   var activeIdx = -1;
+  var lastProgress = 0;
   var fallbackTried = {};
   var retryCount = 0;
   var maxRetries = 3;
@@ -1154,8 +1156,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   document.addEventListener('keydown',function(e){
     if(e.target.tagName==='INPUT')return;
     if(e.code==='Space'){e.preventDefault();if(video.paused)video.play();else video.pause();}
-    if(e.code==='ArrowLeft'){video.currentTime=Math.max(0,video.currentTime-10);}
-    if(e.code==='ArrowRight'){video.currentTime=Math.min(video.duration||0,video.currentTime+10);}
+    if(e.code==='ArrowLeft'){var dur=video.duration;if(dur&&isFinite(dur)){video.currentTime=Math.max(0,video.currentTime-10);}}
+    if(e.code==='ArrowRight'){var dur=video.duration;if(dur&&isFinite(dur)){video.currentTime=Math.min(dur,video.currentTime+10);}}
     if(e.code==='KeyF'){fullscreenBtn.click();}
     if(e.code==='KeyM'){video.muted=!video.muted;updateVolumeIcon();}
   });
@@ -1283,60 +1285,59 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       L('Stream['+idx+'] type='+type+' isDash='+isDash+' isHls='+isHls+' isMpegts='+isMpegts+' isEmbed='+isEmbed+' drm='+(drmKid?'yes':'no')+' url='+(rawUrl||'').substring(0,80));
       if(type==='hls'||type==='dash')setLiveMode(true);
 
-      var shakaFallbackTimer=0;
-      function shakaFallback(){
-        if(shakaFallbackDone||Date.now()>shakaFallbackTimer){return;}
-        shakaFallbackDone=true;
-        if(!shakaTriedProxy){
-          shakaTriedProxy=true;
-          shakaUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
-          L('DASH: falling back to proxy manifest: '+shakaUrl);
-          shakaPlayer.load(shakaUrl).then(function(){L('DASH: proxy succeeded');tracksReady();})['catch'](function(){L('DASH: proxy also failed');shakaFallback();});
-        }else{
-          L('DASH: giving up on this stream');
-          if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
-        }
-      }
       if(isDash){
         if(typeof shaka==='undefined'){showPlaceholder('Shaka Player failed to load.');spinner.classList.add('hidden');return;}
         L('DASH: initializing Shaka Player');
         showVideo();
-        var shakaPlayer=new shaka.Player();
-        player=shakaPlayer;
-        var shakaCfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15}};
-        if(drmKid && drmKey){
-          var kid=normHex(drmKid),key=normHex(drmKey);
-          var ck={};ck[kid]=key;
-          shakaCfg.drm={clearKeys:ck};
-          L('DASH: clearKeys configured kid='+kid+' key='+key);
-        }
-        shakaPlayer.configure(shakaCfg);
         var shakaTriedProxy=false;
         var shakaFallbackDone=false;
-        var shakaFallbackTimer=Date.now()+60000;
+        var shakaFallbackTimer=Date.now()+45000;
         var shakaUrl=rawUrl;
-        L('DASH: trying direct URL: '+(shakaUrl||'').substring(0,80));
-        shakaPlayer.addEventListener('error',function(e){
-          L('Shaka error event: '+(e.detail||'unknown'));
-          try{var st=shakaPlayer.getStats();L('Shaka stats:',st);}catch(_){}
-          setTimeout(function(){shakaFallback();},500);
-        });
-        function tracksReady(){
-          L('DASH: tracks ready');
-          var tracks=shakaPlayer.getVariantTracks()||[];
-          if(tracks.length){buildQualityMenu(tracks);qualityGroup.style.display='inline-flex';}
-          startPlay();
+        function shakaInit(u){
+          var sp=new shaka.Player();
+          player=sp;
+          var cfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15}};
+          if(drmKid && drmKey){
+            var kid=normHex(drmKid),key=normHex(drmKey);
+            var ck={};ck[kid]=key;
+            cfg.drm={clearKeys:ck};
+            L('DASH: clearKeys configured kid='+kid+' key='+key);
+          }
+          sp.configure(cfg);
+          sp.addEventListener('error',function(e){
+            L('Shaka error event: '+(e.detail||'unknown'));
+            try{var st=sp.getStats();L('Shaka stats:',st);}catch(_){}
+            setTimeout(function(){shakaFallback();},500);
+          });
+          sp.attach(video).then(function(){
+            L('DASH: attached, loading '+u);
+            return sp.load(u);
+          }).then(function(){
+            L('DASH: load succeeded');
+            var tracks=sp.getVariantTracks()||[];
+            if(tracks.length){buildQualityMenu(tracks);qualityGroup.style.display='inline-flex';}
+            startPlay();
+          })['catch'](function(err){
+            L('Shaka load catch: '+(err.message||err));
+            setTimeout(function(){shakaFallback();},300);
+          });
         }
-        shakaPlayer.attach(video).then(function(){
-          L('DASH: Shaka attached, loading '+shakaUrl);
-          return shakaPlayer.load(shakaUrl);
-        }).then(function(){
-          L('DASH: load succeeded');
-          tracksReady();
-        })['catch'](function(err){
-          L('Shaka load catch: '+(err.message||err));
-          shakaFallback();
-        });
+        function shakaFallback(){
+          if(shakaFallbackDone||Date.now()>shakaFallbackTimer){return;}
+          shakaFallbackDone=true;
+          try{player&&player.destroy&&player.destroy();}catch(_){}
+          player=null;
+          if(!shakaTriedProxy){
+            shakaTriedProxy=true;
+            shakaUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+            L('DASH: falling back to proxy manifest');
+            shakaInit(shakaUrl);
+          }else{
+            L('DASH: giving up on this stream');
+            if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+          }
+        }
+        shakaInit(shakaUrl);
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
@@ -1344,37 +1345,43 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           showVideo();
           var hlsFallbackDone=false;
           var hlsTriedProxy=false;
-          var hls=new Hls({
-            enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
-            backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,
-            liveDurationInfinity:true,lowLatencyMode:true
-          });
-          hls.on(Hls.Events.MANIFEST_PARSED,function(){
-            L('HLS: manifest parsed, levels='+(hls.levels?hls.levels.length:0));
-            if(hls.levels)buildQualityMenu(hls.levels);
-            qualityGroup.style.display='inline-flex';
-            if(hls.live)setLiveMode(true);
-          });
-          function hlsFallback(){
-            if(hlsFallbackDone){return;}
-            hlsFallbackDone=true;
-            if(!hlsTriedProxy){
-              hlsTriedProxy=true;
-              L('HLS: falling back to proxy');
-              setTimeout(function(){hls.loadSource('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/');},200);
-            }else{
-              L('HLS: both direct and proxy failed');
-              if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+          var hlsUrl=rawUrl;
+          function hlsInit(u){
+            try{player&&player.destroy&&player.destroy();}catch(_){}
+            var h=new Hls({
+              enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,
+              backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,
+              liveDurationInfinity:true,lowLatencyMode:true
+            });
+            h.on(Hls.Events.MANIFEST_PARSED,function(){
+              L('HLS: manifest parsed, levels='+(h.levels?h.levels.length:0));
+              if(h.levels)buildQualityMenu(h.levels);
+              qualityGroup.style.display='inline-flex';
+              if(h.live)setLiveMode(true);
+            });
+            function hlsFallback(){
+              if(hlsFallbackDone){return;}
+              hlsFallbackDone=true;
+              try{h.destroy();}catch(_){}
+              if(!hlsTriedProxy){
+                hlsTriedProxy=true;
+                L('HLS: falling back to proxy');
+                setTimeout(function(){hlsInit('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/');},200);
+              }else{
+                L('HLS: both direct and proxy failed');
+                if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+              }
             }
+            h.on(Hls.Events.ERROR,function(e,data){
+              L('HLS error: type='+data.type+' details='+data.details+' fatal='+data.fatal);
+              if(data.fatal){hlsFallback();}
+            });
+            h.attachMedia(video);
+            h.loadSource(u);
+            player=h;
+            startPlay();
           }
-          hls.on(Hls.Events.ERROR,function(e,data){
-            L('HLS error: type='+data.type+' details='+data.details+' fatal='+data.fatal);
-            if(data.fatal){hlsFallback();}
-          });
-          hls.attachMedia(video);
-          hls.loadSource(rawUrl);
-          player=hls;
-          startPlay();
+          hlsInit(hlsUrl);
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
           L('HLS: using native HLS playback');
           showVideo();video.src=rawUrl;startPlay();
@@ -1446,8 +1453,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var matchHeader=document.getElementById('matchHeader');
   var eventTime=document.getElementById('eventTime');
   {% if event %}
-  var startsAt='{{ event.starts_at }}';
-  var isLiveFlag={% if event %}{{ event.is_live | tojson }}{% else %}0{% endif %};
+  var startsAt={{ event.starts_at | tojson }};
+  var isLiveFlag={{ event.is_live | tojson }};
   if(startsAt){
     function updateTimeDisplay(){
       var now=Date.now();
@@ -1475,7 +1482,13 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     setInterval(updateTimeDisplay,10000);
     // Auto-refresh watch page if match should be live but no streams loaded
     if(!streams||!streams.length){
-      setTimeout(function(){location.reload();},30000);
+      var reloadCount=parseInt(sessionStorage.getItem('zl-reload-count')||'0');
+      if(reloadCount<3){
+        sessionStorage.setItem('zl-reload-count',String(reloadCount+1));
+        setTimeout(function(){location.reload();},30000);
+      }
+    }else{
+      sessionStorage.removeItem('zl-reload-count');
     }
   }
   {% endif %}
@@ -1575,7 +1588,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   /* ---- Auto-fallback Mid-Playback (stall detection) ---- */
   var stallTimer=null;
-  var lastProgress=0;
   var isStalling=false;
   video.addEventListener('timeupdate',function(){
     lastProgress=Date.now();
@@ -1632,7 +1644,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   /* ---- Auto-watch Next Live Match ---- */
   (function(){
-    fetch('/api/upstream/events',{cache:'no-store'}).then(function(r){return r.json();}).then(function(data){
+    fetch('/api/events',{cache:'no-store'}).then(function(r){return r.json();}).then(function(data){
       var evs=(data&&Array.isArray(data.events))?data.events:(Array.isArray(data)?data:[]);
       var live=evs.filter(function(e){return e.is_live===1;});
       if(live.length>0){
