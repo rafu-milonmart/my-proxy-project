@@ -93,8 +93,9 @@ def _fetch_fancode():
     """Fetch FanCode events and normalize into upstream event format."""
     try:
         raw = urllib.request.urlopen(FC_SOURCE, timeout=10).read().decode('utf-8')
-        items = json.loads(raw)
-        if not isinstance(items, list):
+        data = json.loads(raw)
+        items = data.get('matches', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        if not items:
             return []
     except Exception as e:
         _log.debug('FanCode fetch failed: %s', e)
@@ -108,24 +109,31 @@ def _fetch_fancode():
         t1 = item.get('team_1', 'TBD')
         t2 = item.get('team_2', 'TBD')
         status = (item.get('status') or '').upper()
-        hls_bd = item.get('fancode_bd', '')
-        hls_in = item.get('fancode_in', '')
-        events.append({
+        stream_url = item.get('stream_url', '')
+        clearkey = item.get('clearkey', '')
+        is_drm = item.get('is_drm', False)
+        ev = {
             'id': slug,
             'enc_parent': slug,
             'parent': slug,
             'team_a_name': t1,
             'team_b_name': t2,
-            'team_a_logo': item.get('team_1_logo', ''),
-            'team_b_logo': item.get('team_2_logo', ''),
+            'team_a_logo': item.get('src', ''),
+            'team_b_logo': '',
             'sport': item.get('event_category', 'Sports'),
             'league': 'FanCode',
             'title': item.get('event_name', f'{t1} vs {t2}'),
             'status': status,
             'is_fancode': True,
-            'fancode_bd': hls_bd,
-            'fancode_in': hls_in,
-        })
+            'fancode_stream_url': stream_url,
+            'fancode_language': item.get('language', ''),
+        }
+        if is_drm and clearkey:
+            # clearkey format: "kid:key" or just key
+            parts = clearkey.split(':') if ':' in clearkey else ['', clearkey]
+            ev['fancode_drm_kid'] = parts[0]
+            ev['fancode_drm_key'] = parts[1]
+        events.append(ev)
     return events
 
 _EV_TTL = 15
@@ -133,7 +141,7 @@ _PB_TTL = 30
 _M3U_TTL = 30
 _FC_TTL = 60
 
-FC_SOURCE = 'https://raw.githubusercontent.com/sm-monirulislam/FanCode-Auto-Update-Playlist/refs/heads/main/FanCode_data.json'
+FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
 _fc_cache = {}  # key -> (ts, data)
 
 def _cached(key, ttl, fetcher, store=None):
@@ -165,14 +173,13 @@ def _pb_cached(slug):
                 ev = e
                 break
         if ev and ev.get('is_fancode'):
-            streams = []
-            bd = ev.get('fancode_bd', '')
-            ind = ev.get('fancode_in', '')
-            if bd:
-                streams.append({'stream_url': bd, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''})
-            if ind:
-                streams.append({'stream_url': ind, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''})
-            if streams:
+            stream_url = ev.get('fancode_stream_url', '')
+            if stream_url:
+                s = {'stream_url': stream_url, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': ''}
+                if ev.get('fancode_drm_kid'):
+                    s['drm_kid'] = ev['fancode_drm_kid']
+                    s['drm_key'] = ev['fancode_drm_key']
+                streams = [s]
                 _pb_cache[slug] = (time.time(), streams)
                 return streams
         return []
@@ -252,7 +259,7 @@ def _resolve_one(slug):
     if slug.startswith('fc_'):
         for e in _get_events():
             if (e.get('enc_parent') or e.get('parent') or e.get('id')) == slug:
-                return e.get('fancode_bd') or e.get('fancode_in') or None
+                return e.get('fancode_stream_url') or None
         return None
     streams = _pb_cached(slug)
     for s in streams:
