@@ -517,11 +517,11 @@ def _hls_rewrite_proxy(body, base_url, slug, idx):
             def _rewrite_uri(m, _base=base_dir, _pfx=prefix):
                 raw = m.group(1) or m.group(2)
                 abs_url = urljoin(_base, raw)
-                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '"'
+                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1"'
             out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', _rewrite_uri, line))
         else:
             abs_url = urljoin(base_dir, s)
-            out.append(prefix + '?url=' + url_quote(abs_url, safe=''))
+            out.append(prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1')
     return '\n'.join(out)
 
 def _proxy_fetch(url, ua, ref='', timeout=15):
