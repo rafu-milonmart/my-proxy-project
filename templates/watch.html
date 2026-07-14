@@ -880,6 +880,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var qualityRow = document.getElementById('qualityRow');
   var streams = {{ streams | tojson }};
   var slug = '{{ slug }}';
+  var isFancode = slug.indexOf('fc_') === 0;
   var player = null;
   var activeIdx = -1;
   var lastProgress = 0;
@@ -1341,11 +1342,17 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
-          L('HLS: initializing Hls.js with direct URL: '+(rawUrl||'').substring(0,80));
-          showVideo();
           var hlsFallbackDone=false;
           var hlsTriedProxy=false;
-          var hlsUrl=rawUrl;
+          var hlsUrl;
+          if(isFancode){
+            hlsUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
+            L('HLS: FanCode stream, using proxy+rewrite: '+hlsUrl);
+          }else{
+            hlsUrl=rawUrl;
+            L('HLS: initializing Hls.js with direct URL: '+(rawUrl||'').substring(0,80));
+          }
+          showVideo();
           function hlsInit(u){
             try{player&&player.destroy&&player.destroy();}catch(_){}
             var h=new Hls({
@@ -1366,7 +1373,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
               if(!hlsTriedProxy){
                 hlsTriedProxy=true;
                 L('HLS: falling back to proxy');
-                setTimeout(function(){hlsInit('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/');},200);
+                setTimeout(function(){hlsInit('/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+(isFancode?'/?rewrite=1':'/'));},200);
               }else{
                 L('HLS: both direct and proxy failed');
                 if(!fallbackTried[activeIdx+1])tryNext(activeIdx);

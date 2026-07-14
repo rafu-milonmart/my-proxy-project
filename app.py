@@ -1,6 +1,6 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio, shutil, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, quote as url_quote
 from pathlib import Path
 from flask import Flask, redirect, send_from_directory, Response, request, jsonify, render_template, url_for
 from curl_cffi import requests as curl_requests
@@ -503,6 +503,27 @@ def _hls_rewrite(body, base_dir):
             out.append(urljoin(base_dir, s))
     return '\n'.join(out)
 
+def _hls_rewrite_proxy(body, base_url, slug, idx):
+    """Rewrite m3u8 so all sub-playlists and segments go through our proxy."""
+    lines = body.split('\n')
+    out = []
+    base_dir = base_url[:base_url.rfind('/') + 1]
+    prefix = f'/proxy/hls/{slug}/{idx}/'
+    for line in lines:
+        s = line.strip()
+        if not s:
+            out.append(line)
+        elif s[0] == '#':
+            def _rewrite_uri(m, _base=base_dir, _pfx=prefix):
+                raw = m.group(1) or m.group(2)
+                abs_url = urljoin(_base, raw)
+                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '"'
+            out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', _rewrite_uri, line))
+        else:
+            abs_url = urljoin(base_dir, s)
+            out.append(prefix + '?url=' + url_quote(abs_url, safe=''))
+    return '\n'.join(out)
+
 def _proxy_fetch(url, ua, ref='', timeout=15):
     hdrs = {'User-Agent': ua, 'Accept': '*/*', 'Origin': UPSTREAM}
     if ref: hdrs['Referer'] = ref
@@ -519,6 +540,7 @@ def _proxy_fetch(url, ua, ref='', timeout=15):
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
     target = request.args.get('url', '')
+    rewrite = request.args.get('rewrite', '') == '1'
     streams = _pb_cached(slug)
     if not streams or idx >= len(streams):
         return jsonify({"error": "Not found"}), 404
@@ -536,6 +558,8 @@ def proxy_hls(slug, idx):
     if code == 200:
         text = body.decode('utf-8', errors='replace')
         if '.m3u8' in target or text.startswith('#EXT'):
+            if rewrite:
+                return Response(_hls_rewrite_proxy(text, target, slug, idx), content_type='application/vnd.apple.mpegurl')
             return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
         return Response(body, content_type=ct or 'application/octet-stream')
     return jsonify({"error": "Upstream failed"}), 502
