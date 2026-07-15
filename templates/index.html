@@ -1177,6 +1177,11 @@ img{max-width:100%;display:block}
     });
   });
 
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href^="/watch/"]');
+    if(a)localStorage.setItem('_lt',Date.now());
+  });
+
 })();
 </script>
 </body>

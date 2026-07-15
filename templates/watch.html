@@ -599,6 +599,15 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;
   box-shadow:0 2px 10px var(--accent-glow);
 }
+.srv-lat{
+  display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;
+  border-radius:3px;margin-left:4px;vertical-align:middle;
+  background:rgba(255,255,255,.08);color:rgba(255,255,255,.5);
+  transition:all .3s;letter-spacing:.3px;
+}
+.srv-lat.fast{background:rgba(34,197,94,.2);color:#22c55e}
+.srv-lat.medium{background:rgba(234,179,8,.2);color:#eab308}
+.srv-lat.slow{background:rgba(239,68,68,.2);color:#ef4444}
 .section-top{
   display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
 }
@@ -911,6 +920,8 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var retryTimer = null;
   var fallbackAttempts = 0;
   var maxFallbackAttempts = 8;
+  var streamLatencies = {};
+  var loadStartTime = 0;
   var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
   var L = function(msg, data) {
     try {
@@ -1085,7 +1096,23 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   });
   video.addEventListener('waiting',function(){spinner.classList.remove('hidden');});
   video.addEventListener('canplay',function(){spinner.classList.add('hidden');});
-  video.addEventListener('playing',function(){spinner.classList.add('hidden');playerWrap.classList.add('playing');});
+  video.addEventListener('playing',function(){
+    spinner.classList.add('hidden');playerWrap.classList.add('playing');
+    if(loadStartTime>0 && activeIdx>=0){
+      var ms=Date.now()-loadStartTime;
+      var secs=(ms/1000).toFixed(1);
+      streamLatencies[activeIdx]=ms;
+      var btn=document.querySelector('.srv-btn[data-idx="'+activeIdx+'"]');
+      if(btn){
+        var lat=btn.querySelector('.srv-lat');
+        if(!lat){lat=document.createElement('span');lat.className='srv-lat';btn.appendChild(lat);}
+        lat.textContent=secs+'s';
+        lat.classList.remove('fast','medium','slow');
+        lat.classList.add(ms<1000?'fast':ms<3000?'medium':'slow');
+      }
+    }
+    loadStartTime=0;
+  });
   video.addEventListener('pause',function(){playerWrap.classList.remove('playing');});
   video.addEventListener('waiting',function(){playerWrap.classList.remove('playing');});
 
@@ -1301,6 +1328,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   function loadStream(idx){
     L('loadStream('+idx+') called');
+    var stored=parseInt(localStorage.getItem('_lt'),10);
+    loadStartTime=(stored && stored>0 && stored>Date.now()-60000)?stored:Date.now();
+    localStorage.removeItem('_lt');
     lastProgress=Date.now();
     destroyPlayer();
     document.querySelectorAll('.srv-btn').forEach(function(b){b.classList.remove('active');});
@@ -1659,6 +1689,11 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     }
     info.push({label:'Volume',value:Math.round((video.muted?0:video.volume)*100)+'%'});
     info.push({label:'Speed',value:video.playbackRate+'x'});
+    if(activeIdx>=0 && streamLatencies[activeIdx]!==undefined){
+      var lMs=streamLatencies[activeIdx];
+      var cls=lMs<1000?'fast':lMs<3000?'medium':'slow';
+      info.push({label:'Latency',value:'<span class="srv-lat '+cls+'" style="font-size:11px">'+(lMs/1000).toFixed(1)+'s</span>'});
+    }
     infoBody.innerHTML=info.map(function(i){
       return '<div class="row"><span class="label">'+i.label+'</span><span class="value">'+i.value+'</span></div>';
     }).join('');
