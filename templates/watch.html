@@ -443,7 +443,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 .player-overlay.paused .center-play:hover{transform:translate(-50%,-50%) scale(1.08);background:rgba(0,0,0,.65)}
 .player-overlay .bottom-bar{
   position:absolute;bottom:0;left:0;right:0;
-  padding:8px 12px 10px;
+  padding:0 12px 10px;
   background:linear-gradient(0deg,var(--overlay) 0%,transparent 100%);
   pointer-events:auto;
 }
@@ -461,34 +461,50 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 .player-overlay .time-display{
   font-size:12px;font-weight:500;color:rgba(255,255,255,.8);
   font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:.3px;
+  flex-shrink:0;
 }
 .player-overlay .time-display .sep{margin:0 3px;opacity:.5}
+
+/* Progress bar - full width row above controls */
+.progress-row{
+  padding:0 4px 6px;
+}
 .progress-wrap{
-  position:relative;width:100%;margin:0 4px;
-  cursor:pointer;height:24px;display:flex;align-items:center;
+  position:relative;width:100%;cursor:pointer;height:20px;display:flex;align-items:center;
 }
 .progress-track{
   position:relative;width:100%;height:4px;
-  background:rgba(255,255,255,.2);border-radius:4px;
-  overflow:hidden;transition:height .15s;
+  background:rgba(255,255,255,.15);border-radius:4px;
+  transition:height .15s ease;
+  overflow:visible;
 }
 .progress-wrap:hover .progress-track{height:6px}
 .progress-fill{
   height:100%;background:var(--accent);border-radius:4px;
-  transition:width .1s linear;position:relative;
+  transition:none;position:relative;
+  max-width:100%;
 }
 .progress-fill::after{
-  content:'';position:absolute;right:-5px;top:50%;transform:translateY(-50%);
-  width:10px;height:10px;border-radius:50%;
-  background:var(--accent);opacity:0;transition:opacity .15s;
-  box-shadow:0 0 8px var(--accent-glow);
+  content:'';position:absolute;right:-6px;top:50%;transform:translateY(-50%);
+  width:12px;height:12px;border-radius:50%;
+  background:#fff;opacity:0;transition:opacity .15s ease,transform .15s ease;
+  box-shadow:0 0 6px rgba(0,0,0,.4),0 0 12px var(--accent-glow);
 }
-.progress-wrap:hover .progress-fill::after{opacity:1}
+.progress-wrap:hover .progress-fill::after{opacity:1;transform:translateY(-50%) scale(1)}
+.progress-wrap.scrubbing .progress-fill::after{opacity:1;transform:translateY(-50%) scale(1.2)}
 .progress-buffer{
   position:absolute;top:0;left:0;height:100%;
-  background:rgba(255,255,255,.1);border-radius:4px;
+  background:rgba(255,255,255,.12);border-radius:4px;
 }
-.volume-wrap{position:relative;display:flex;align-items:center}
+.progress-tooltip{
+  position:absolute;bottom:calc(100% + 8px);transform:translateX(-50%);
+  background:rgba(0,0,0,.85);color:#fff;font-size:11px;font-weight:600;
+  padding:3px 7px;border-radius:4px;white-space:nowrap;
+  pointer-events:none;opacity:0;transition:opacity .12s;
+  font-variant-numeric:tabular-nums;
+}
+.progress-wrap:hover .progress-tooltip{opacity:1}
+.volume-wrap{position:relative;display:flex;align-items:center;flex-shrink:0}
 .volume-slider{
   width:0;overflow:hidden;transition:width .2s ease;
   display:flex;align-items:center;height:34px;
@@ -501,10 +517,12 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 }
 .volume-slider input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none;appearance:none;
-  width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;
+  width:12px;height:12px;border-radius:50%;background:#fff;cursor:pointer;
+  box-shadow:0 0 4px rgba(0,0,0,.3);
 }
 .volume-slider input[type=range]::-moz-range-thumb{
-  width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:none;
+  width:12px;height:12px;border-radius:50%;background:#fff;cursor:pointer;border:none;
+  box-shadow:0 0 4px rgba(0,0,0,.3);
 }
 
 /* Spinner */
@@ -661,9 +679,10 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   .player-overlay .ctrl-btn svg{width:16px;height:16px}
   .player-overlay .center-play{width:52px;height:52px}
   .player-overlay .center-play svg{width:22px;height:22px}
-  .player-overlay .bottom-bar{padding:6px 8px 8px}
+  .player-overlay .bottom-bar{padding:0 8px 8px}
   .player-overlay .top-bar{padding:8px 10px}
   .player-overlay .time-display{font-size:11px}
+  .progress-row{padding:0 2px 4px}
   .volume-wrap:hover .volume-slider,.volume-slider.open{width:60px}
   .volume-slider input[type=range]{width:50px}
 }
@@ -752,17 +771,20 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="8 5 19 12 8 19 8 5"/></svg>
         </button>
         <div class="bottom-bar">
+          <div class="progress-row">
+            <div class="progress-wrap" id="progressWrap">
+              <div class="progress-track">
+                <div class="progress-buffer" id="progressBuffer"></div>
+                <div class="progress-fill" id="progressFill" style="width:0%"></div>
+              </div>
+              <div class="progress-tooltip" id="progressTooltip"></div>
+            </div>
+          </div>
           <div class="controls-row">
             <button class="ctrl-btn play-btn" id="playBtn" aria-label="Play/Pause">
               <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="8 5 19 12 8 19 8 5"/></svg>
             </button>
             <span class="time-display"><span id="currentTime">0:00</span><span class="sep"> / </span><span id="totalTime">0:00</span></span>
-            <div class="progress-wrap" style="flex:1;margin:0 4px" id="progressWrap">
-              <div class="progress-track">
-                <div class="progress-buffer" id="progressBuffer"></div>
-                <div class="progress-fill" id="progressFill" style="width:0%"></div>
-              </div>
-            </div>
             <div class="volume-wrap">
               <button class="ctrl-btn" id="volumeBtn" aria-label="Volume">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
@@ -945,6 +967,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var progressFill = document.getElementById('progressFill');
   var progressBuffer = document.getElementById('progressBuffer');
   var progressWrap = document.getElementById('progressWrap');
+  var progressTooltip = document.getElementById('progressTooltip');
   var currentTimeEl = document.getElementById('currentTime');
   var totalTimeEl = document.getElementById('totalTime');
   var timeSep = document.querySelector('.time-display .sep');
@@ -1074,14 +1097,31 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
 
   function seek(e,el){
     var r=el.getBoundingClientRect();
-    var p=(e.clientX-r.left)/r.width;
+    var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
     var ss=getSeekStart();
     var ws=getWindowSize();
     if(ws&&isFinite(ws)&&ws>0){video.currentTime=ss+p*ws;}
     else if(video.duration){video.currentTime=p*video.duration;}
   }
-  progressWrap.addEventListener('mousedown',function(e){isSeeking=true;seek(e,this);});
-  document.addEventListener('mouseup',function(){isSeeking=false;resetHideTimer();});
+  function seekTimeFromEvent(e){
+    var r=progressWrap.getBoundingClientRect();
+    var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+    var ss=getSeekStart();
+    var ws=getWindowSize();
+    if(ws&&isFinite(ws)&&ws>0)return ss+p*ws;
+    if(video.duration)return p*video.duration;
+    return 0;
+  }
+  progressWrap.addEventListener('mousemove',function(e){
+    if(isSeeking)return;
+    var t=seekTimeFromEvent(e);
+    var r=progressWrap.getBoundingClientRect();
+    var x=e.clientX-r.left;
+    progressTooltip.textContent=formatTime(t);
+    progressTooltip.style.left=Math.max(16,Math.min(x,r.width-16))+'px';
+  });
+  progressWrap.addEventListener('mousedown',function(e){isSeeking=true;progressWrap.classList.add('scrubbing');seek(e,this);});
+  document.addEventListener('mouseup',function(){isSeeking=false;progressWrap.classList.remove('scrubbing');resetHideTimer();});
   document.addEventListener('mousemove',function(e){if(isSeeking)seek(e,progressWrap);});
 
   volumeBtn.addEventListener('click',function(){video.muted=!video.muted;updateVolumeIcon();volumeSlider.classList.toggle('open');});
@@ -1165,7 +1205,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     if(e.code==='KeyM'){video.muted=!video.muted;updateVolumeIcon();}
   });
 
-  progressWrap.addEventListener('click',function(e){if(!isSeeking)seek(e,this);});
+  /* click removed — mousedown handles seek */
 
   /* ---- End Custom Controls ---- */
 
