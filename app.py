@@ -264,6 +264,12 @@ def _dedup_merge(all_events):
             for flag in ('is_fancode', 'is_tapmad'):
                 if ev.get(flag):
                     existing[flag] = True
+            # Copy FanCode stream data into merged event
+            if ev.get('is_fancode') and ev.get('fancode_stream_url'):
+                existing['fancode_stream_url'] = ev['fancode_stream_url']
+            for k in ('fancode_drm_kid', 'fancode_drm_key', 'fancode_language'):
+                if ev.get(k) and not existing.get(k):
+                    existing[k] = ev[k]
             # If upstream event merged into a new-source event, swap key to
             # upstream slug so _pb_cached() can resolve upstream streams.
             is_upstream_merge = (not ev.get('is_fancode') and not ev.get('is_tapmad'))
@@ -330,6 +336,18 @@ def _pb_cached(slug):
     # Extra streams from merge (TapMad)
     extra_streams = ev.get('streams', [])
     streams = upstream_streams + fc_streams + extra_streams
+    # Deduplicate by (source, URL) — keep one per source for fallback
+    seen = set()
+    unique = []
+    for s in streams:
+        url = (s.get('stream_url') or '').strip()
+        src = (s.get('source') or '').strip()
+        key = (src, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(s)
+    streams = unique
     if streams:
         _pb_cache[slug] = (now, streams)
     return streams
