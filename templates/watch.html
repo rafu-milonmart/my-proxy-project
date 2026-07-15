@@ -808,9 +808,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
                 <button data-speed="3">3x</button>
               </div>
             </div>
-            <button class="ctrl-btn" id="shareBtn" aria-label="Share" style="display:none">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
-            </button>
             <button class="ctrl-btn" id="fullscreenBtn" aria-label="Fullscreen">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
             </button>
@@ -1590,22 +1587,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     showToast('Downloaded! Open the .m3u file with VLC Media Player.');
   });
 
-  /* ---- Share Button ---- */
-  var shareBtn=document.getElementById('shareBtn');
-  if(navigator.share){
-    shareBtn.style.display='flex';
-    shareBtn.addEventListener('click',function(){
-      navigator.share({title:document.title,url:window.location.href})['catch'](function(){});
-    });
-  }else if(navigator.clipboard){
-    shareBtn.style.display='flex';
-    shareBtn.addEventListener('click',function(){
-      navigator.clipboard.writeText(window.location.href).then(function(){
-        showToast('Link copied to clipboard!');
-      })['catch'](function(){});
-    });
-  }
-
   /* ---- Persistent Speed ---- */
   var savedSpeed=localStorage.getItem('zl-speed');
   if(savedSpeed){
@@ -1693,7 +1674,6 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       if(infoOverlay.classList.contains('open'))infoOverlay.classList.remove('open');
       else showInfo();
     }
-    if(e.code==='KeyS'&&!e.ctrlKey&&!e.metaKey){e.preventDefault();shareBtn.click();}
   });
 
   /* ---- Auto-watch Next Live Match ---- */
