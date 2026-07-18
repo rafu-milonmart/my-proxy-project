@@ -1357,40 +1357,63 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       L('Stream['+idx+'] type='+type+' isDash='+isDash+' isHls='+isHls+' isMpegts='+isMpegts+' isEmbed='+isEmbed+' drm='+(drmKid?'yes':'no')+' url='+(rawUrl||'').substring(0,80));
       if(type==='hls'||type==='dash')setLiveMode(true);
 
-      var dashWon=false;
       if(isDash){
         if(typeof shaka==='undefined'){showPlaceholder('Shaka Player failed to load.');spinner.classList.add('hidden');return;}
-        L('DASH: hyper-threading direct + proxy');
+        L('DASH: trying direct, will fallback to proxy if needed');
         showVideo();
-        function dashTry(url, label){
-          if(dashWon)return;
-          L('DASH('+label+'): '+url);
+        var dashProxyDone=false;
+        var dashTriedProxy=false;
+        function dashInit(u){
           var sp=new shaka.Player();
+          player=sp;
           var cfg={abr:{enabled:true},streaming:{bufferingGoal:30,rebufferingGoal:15}};
           if(drmKid && drmKey){
             var kid=normHex(drmKid),key=normHex(drmKey);
             var ck={};ck[kid]=key;cfg.drm={clearKeys:ck};
           }
           sp.configure(cfg);
-          var t=setTimeout(function(){if(!dashWon){L('DASH('+label+'): timeout');try{sp.destroy();}catch(_){}}},8000);
-          sp.addEventListener('error',function(){if(!dashWon){clearTimeout(t);try{sp.destroy();}catch(_){}}});
-          sp.attach(video).then(function(){return sp.load(url);}).then(function(){
-            if(dashWon){try{sp.destroy();}catch(_){}return;}
-            L('DASH('+label+'): won');
-            clearTimeout(t);dashWon=true;
-            player=sp;
+          sp.addEventListener('error',function(e){
+            if(dashProxyDone)return;
+            L('DASH error: '+(e.detail||'unknown'));
+            dashFallback();
+          });
+          var t=setTimeout(function(){
+            if(dashProxyDone)return;
+            L('DASH: timeout on '+u.substring(0,60));
+            try{sp.destroy&&sp.destroy();}catch(_){}
+            dashFallback();
+          },12000);
+          sp.attach(video).then(function(){
+            return sp.load(u);
+          }).then(function(){
+            clearTimeout(t);dashProxyDone=true;
+            L('DASH: loaded OK');
             var tracks=sp.getVariantTracks()||[];
             if(tracks.length){buildQualityMenu(tracks);qualityGroup.style.display='inline-flex';}
             startPlay();
           })['catch'](function(err){
-            if(dashWon)return;
-            L('DASH('+label+'): failed: '+(err.message||err));
-            clearTimeout(t);try{sp.destroy();}catch(_){}
+            clearTimeout(t);
+            L('DASH: load failed: '+(err.message||err));
+            try{sp.destroy&&sp.destroy();}catch(_){}
+            dashFallback();
           });
+          function dashFallback(){
+            if(dashProxyDone)return;
+            dashProxyDone=true;
+            try{player&&player.destroy&&player.destroy();}catch(_{})
+            player=null;
+            if(!dashTriedProxy){
+              dashTriedProxy=true;
+              var pUrl='/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/';
+              L('DASH: direct failed, trying proxy manifest');
+              setTimeout(function(){dashInit(pUrl);},200);
+            }else{
+              L('DASH: both direct and proxy failed');
+              if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+            }
+          }
         }
-        dashTry(rawUrl, 'direct');
-        dashTry('/proxy/manifest/'+encodeURIComponent(slug)+'/'+idx+'/', 'proxy');
-        setTimeout(function(){if(!dashWon){L('DASH: all failed');if(!fallbackTried[activeIdx+1])tryNext(activeIdx);}},12000);
+        dashInit(rawUrl);
       }else if(isHls){
         if(typeof Hls==='undefined'){showPlaceholder('Hls.js failed to load.');spinner.classList.add('hidden');return;}
         if(Hls.isSupported()){
@@ -1405,34 +1428,53 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
             ph.on(Hls.Events.ERROR,function(e,data){if(data.fatal&&!fallbackTried[activeIdx+1])tryNext(activeIdx);});
             ph.attachMedia(video);ph.loadSource(phlsUrl);player=ph;startPlay();
           }else{
-            L('HLS: hyper-threading direct + proxy');
-            var hlsWon=false;
-            function hlsRace(url, label){
-              if(hlsWon)return;
-              L('HLS('+label+'): '+url);
+            L('HLS: trying direct, will fallback to proxy if needed');
+            var hlsProxyDone=false;
+            var hlsUrl=rawUrl;
+            function hlsInit(u){
+              try{player&&player.destroy&&player.destroy();}catch(_){}
               var h=new Hls({enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,liveDurationInfinity:true,lowLatencyMode:true});
-              var t=setTimeout(function(){if(!hlsWon){L('HLS('+label+'): timeout');try{h.destroy();}catch(_){}}},10000);
+              var directFailed=false;
+              var t=setTimeout(function(){
+                if(hlsProxyDone)return;
+                L('HLS: timeout on '+u.substring(0,60));
+                directFailed=true;
+                try{h.destroy();}catch(_){}
+                hlsFallback();
+              },12000);
               h.on(Hls.Events.MANIFEST_PARSED,function(){
-                if(hlsWon){try{h.destroy();}catch(_){}return;}
-                L('HLS('+label+'): won');
-                clearTimeout(t);hlsWon=true;player=h;
+                clearTimeout(t);
+                L('HLS: manifest parsed, levels='+(h.levels?h.levels.length:0));
                 if(h.levels)buildQualityMenu(h.levels);qualityGroup.style.display='inline-flex';
                 if(h.live)setLiveMode(true);
-                startPlay();
+                hlsProxyDone=true;
+                player=h;startPlay();
               });
               var nonFatal=0;
               h.on(Hls.Events.ERROR,function(e,data){
-                if(hlsWon)return;
-                if(data.fatal){clearTimeout(t);try{h.destroy();}catch(_){}return;}
-                if(data.type==='networkError'){nonFatal++;if(nonFatal>=5){clearTimeout(t);try{h.destroy();}catch(_){}}}
+                if(hlsProxyDone)return;
+                L('HLS error: type='+data.type+' details='+data.details+' fatal='+data.fatal);
+                if(data.fatal){clearTimeout(t);try{h.destroy();}catch(_){}hlsFallback();return;}
+                if(data.type==='networkError'){nonFatal++;if(nonFatal>=5){clearTimeout(t);try{h.destroy();}catch(_){}hlsFallback();}}
               });
-              h.attachMedia(video);h.loadSource(url);
+              h.attachMedia(video);h.loadSource(u);player=h;
+              function hlsFallback(){
+                if(hlsProxyDone)return;
+                hlsProxyDone=true;
+                if(!hlsTriedProxy){
+                  hlsTriedProxy=true;
+                  var pUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
+                  if(stream&&stream.referer)pUrl+='&referer='+encodeURIComponent(stream.referer);
+                  L('HLS: direct failed, trying proxy');
+                  setTimeout(function(){hlsInit(pUrl);},200);
+                }else{
+                  L('HLS: both direct and proxy failed');
+                  if(!fallbackTried[activeIdx+1])tryNext(activeIdx);
+                }
+              }
             }
-            hlsRace(rawUrl, 'direct');
-            var pUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
-            if(stream&&stream.referer)pUrl+='&referer='+encodeURIComponent(stream.referer);
-            setTimeout(function(){hlsRace(pUrl, 'proxy');},2000);
-            setTimeout(function(){if(!hlsWon){L('HLS: all failed');if(!fallbackTried[activeIdx+1])tryNext(activeIdx);}},16000);
+            var hlsTriedProxy=false;
+            hlsInit(rawUrl);
           }
         }else if(video.canPlayType('application/vnd.apple.mpegurl')){
           L('HLS: using native HLS playback');
