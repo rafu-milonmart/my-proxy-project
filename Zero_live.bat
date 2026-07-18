@@ -27,6 +27,7 @@ set GITHUB_API=https://api.github.com/repos/rafu-milonmart/my-proxy-project/comm
 set LATEST_SHA=__FAIL__
 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing; Write-Output ($r.Content | ConvertFrom-Json).sha } catch { Write-Output '__FAIL__' }" > "%TEMP%\zero_live_sha.txt"
 set /p LATEST_SHA=<"%TEMP%\zero_live_sha.txt"
+for /f "tokens=* delims= " %%a in ("!LATEST_SHA!") do set "LATEST_SHA=%%a"
 
 if "!LATEST_SHA!"=="__FAIL__" goto :NO_UPDATE
 if "!LATEST_SHA!"=="" goto :NO_UPDATE
@@ -42,7 +43,7 @@ set "PROJ_DIR=%~dp0"
 set "PROJ_DIR=%PROJ_DIR:~0,-1%"
 robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%PROJ_DIR%" /E /XD "python" /XF "version.txt" /IS /IT
 if not errorlevel 8 (
-    >"%~dp0version.txt" echo %LATEST_SHA%
+    echo %LATEST_SHA%>"%~dp0version.txt"
     "%~dp0python\python.exe" -m pip install -r "%~dp0requirements.txt" --quiet
     echo [UPDATE] Update complete.
 ) else (
