@@ -27,7 +27,6 @@ set GITHUB_API=https://api.github.com/repos/rafu-milonmart/my-proxy-project/comm
 set LATEST_SHA=__FAIL__
 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%GITHUB_API%' -UseBasicParsing; Write-Output ($r.Content | ConvertFrom-Json).sha } catch { Write-Output '__FAIL__' }" > "%TEMP%\zero_live_sha.txt"
 set /p LATEST_SHA=<"%TEMP%\zero_live_sha.txt"
-for /f "tokens=* delims= " %%a in ("!LATEST_SHA!") do set "LATEST_SHA=%%a"
 
 if "!LATEST_SHA!"=="__FAIL__" goto :NO_UPDATE
 if "!LATEST_SHA!"=="" goto :NO_UPDATE
@@ -40,11 +39,18 @@ echo [UPDATE] New version found! Downloading...
 powershell -NoProfile -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z = '%TEMP%\zero_live_update.zip'; Invoke-WebRequest -Uri 'https://github.com/rafu-milonmart/my-proxy-project/archive/master.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath '%TEMP%\zero_live_update' -Force }"
 echo [UPDATE] Applying update...
 set "PROJ_DIR=%~dp0"
-set "PROJ_DIR=%PROJ_DIR:~0,-1%"
-robocopy "%TEMP%\zero_live_update\my-proxy-project-master" "%PROJ_DIR%" /E /XD "python" /XF "version.txt" /IS /IT
-if not errorlevel 8 (
-    echo %LATEST_SHA%>"%~dp0version.txt"
-    "%~dp0python\python.exe" -m pip install -r "%~dp0requirements.txt" --quiet
+set "PROJ_DIR=!PROJ_DIR:~0,-1!"
+set "UPDATE_SRC=%TEMP%\zero_live_update\my-proxy-project-master"
+
+REM Exclude Zero_live.bat so we don't overwrite ourselves while running
+robocopy "!UPDATE_SRC!" "!PROJ_DIR!" /E /XD "python" /XF "version.txt" "Zero_live.bat" /IS /IT
+set RC=!ERRORLEVEL!
+
+if !RC! LSS 8 (
+    echo(!LATEST_SHA!>"!VERSION_FILE!"
+    "!PYTHON!" -m pip install -r "!PROJ_DIR!\requirements.txt" --quiet
+    REM Save new bat so it gets applied on next restart
+    if exist "!UPDATE_SRC!\Zero_live.bat" copy /Y "!UPDATE_SRC!\Zero_live.bat" "!PROJ_DIR!\Zero_live.new.bat" >nul 2>&1
     echo [UPDATE] Update complete.
 ) else (
     echo [UPDATE] Copy failed, skipping.
@@ -73,6 +79,12 @@ if "%BROWSER_OPENED%"=="0" (
   set BROWSER_OPENED=1
   timeout /t 2 /nobreak >nul
   start /b "" http://127.0.0.1:9090
+)
+REM Apply new bat if one was saved during update
+if exist "%~dp0Zero_live.new.bat" (
+    copy /Y "%~dp0Zero_live.new.bat" "%~dp0Zero_live.bat" >nul 2>&1
+    del "%~dp0Zero_live.new.bat" >nul 2>&1
+    echo [UPDATE] Batch file updated.
 )
 echo App exited (code !errorlevel!). Restarting in 3s...
 timeout /t 3 /nobreak >nul
