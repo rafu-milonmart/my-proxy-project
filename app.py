@@ -68,7 +68,7 @@ _http_headers = {
     "X-Requested-With": "lsp",
     "X-LSP-Enc": "1",
 }
-_UA_MOBILE = "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+_UA_MOBILE = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36"
 _media_headers = {
     "Accept": "*/*",
     "User-Agent": _UA_MOBILE,
@@ -199,7 +199,7 @@ def _fetch_tapmad():
                     'stream_url': stream_url,
                     'stream_type': 'hls',
                     'referer': 'https://www.tapmad.com/',
-                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    'user_agent': _UA_MOBILE,
                     'needs_proxy': True,
                 }
             ],
@@ -330,7 +330,7 @@ def _pb_cached(slug):
     if ev.get('is_fancode'):
         stream_url = ev.get('fancode_stream_url', '')
         if stream_url:
-            s = {'stream_url': stream_url, 'stream_type': 'hls', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'referer': '', 'source': 'FanCode', 'needs_proxy': True}
+            s = {'stream_url': stream_url, 'stream_type': 'hls', 'user_agent': _UA_MOBILE, 'referer': '', 'source': 'FanCode', 'needs_proxy': True}
             if ev.get('fancode_drm_kid'):
                 s['drm_kid'] = ev['fancode_drm_kid']
                 s['drm_key'] = ev['fancode_drm_key']
@@ -687,7 +687,7 @@ def _hls_rewrite_proxy(body, base_url, slug, idx, referer=''):
     return '\n'.join(out)
 
 def _proxy_fetch(url, ua, ref='', timeout=10):
-    hdrs = {'User-Agent': ua, 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9'}
+    hdrs = {'Accept': '*/*'}
     if ref:
         hdrs['Referer'] = ref
         if '://' in ref:
@@ -695,6 +695,7 @@ def _proxy_fetch(url, ua, ref='', timeout=10):
     else:
         if 'akamaized.net' in url or 'tapmad' in url.lower():
             hdrs['Referer'] = 'https://www.tapmad.com/'
+            hdrs['Origin'] = 'https://www.tapmad.com'
         else:
             p = urlparse(url)
             if p.netloc:
@@ -728,7 +729,7 @@ def proxy_hls(slug, idx):
     if not p.netloc:
         target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
     ref = request.args.get('referer', '') or s.get('referer', '')
-    ua = request.args.get('user_agent', '') or s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ua = request.args.get('user_agent', '') or s.get('user_agent', '') or _UA_MOBILE
     code, body, ct = _proxy_fetch(target, ua, ref, 15)
     if code == 200:
         text = body.decode('utf-8', errors='replace')
@@ -751,14 +752,11 @@ def proxy_dash_seg(slug, idx, seg_path):
     qs = request.query_string
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
-    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ua = s.get('user_agent', '') or _UA_MOBILE
     ref = s.get('referer', '') or ''
     if not ref:
         p = urlparse(base_url)
         ref = f'{p.scheme}://{p.netloc}/' if p.netloc else ''
-    hdrs = {'User-Agent': ua, 'Accept': '*/*'}
-    if ref:
-        hdrs['Referer'] = ref
     code, body, ct = _proxy_fetch(target, ua, ref, 10)
     if code == 200:
         return Response(body, content_type=ct or 'application/octet-stream')
@@ -779,14 +777,14 @@ def proxy_manifest(slug, idx):
     s = streams[idx]
     raw_url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
     url = _clean_url(raw_url)
-    ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ua = s.get('user_agent', '') or _UA_MOBILE
     ref = s.get('referer', '') or ''
     if not ref:
         p = urlparse(url)
         ref = f'{p.scheme}://{p.netloc}/' if p.netloc else ''
     for attempt in range(3):
         try:
-            hdrs = {'User-Agent': ua, 'Accept': '*/*'}
+            hdrs = {'Accept': '*/*'}
             if ref:
                 hdrs['Referer'] = ref
                 hdrs['Origin'] = ref.rstrip('/')
