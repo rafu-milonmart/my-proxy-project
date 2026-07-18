@@ -68,8 +68,10 @@ _http_headers = {
     "X-Requested-With": "lsp",
     "X-LSP-Enc": "1",
 }
+_UA_MOBILE = "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 _media_headers = {
     "Accept": "*/*",
+    "User-Agent": _UA_MOBILE,
 }
 
 # ---------------------------------------------------------------------------
@@ -685,13 +687,19 @@ def _hls_rewrite_proxy(body, base_url, slug, idx, referer=''):
     return '\n'.join(out)
 
 def _proxy_fetch(url, ua, ref='', timeout=10):
-    hdrs = {'User-Agent': ua, 'Accept': '*/*'}
+    hdrs = {'User-Agent': ua, 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9'}
     if ref:
         hdrs['Referer'] = ref
+        if '://' in ref:
+            hdrs['Origin'] = ref.rsplit('/', 1)[0]
     else:
-        # Auto-inject referer for known CDNs that require it
         if 'akamaized.net' in url or 'tapmad' in url.lower():
             hdrs['Referer'] = 'https://www.tapmad.com/'
+        else:
+            p = urlparse(url)
+            if p.netloc:
+                hdrs['Referer'] = f'{p.scheme}://{p.netloc}/'
+                hdrs['Origin'] = f'{p.scheme}://{p.netloc}'
     for attempt in range(3):
         try:
             r = _media_sess().get(url, headers=hdrs, timeout=timeout)
@@ -744,7 +752,14 @@ def proxy_dash_seg(slug, idx, seg_path):
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    code, body, ct = _proxy_fetch(target, ua, '', 10)
+    ref = s.get('referer', '') or ''
+    if not ref:
+        p = urlparse(base_url)
+        ref = f'{p.scheme}://{p.netloc}/' if p.netloc else ''
+    hdrs = {'User-Agent': ua, 'Accept': '*/*'}
+    if ref:
+        hdrs['Referer'] = ref
+    code, body, ct = _proxy_fetch(target, ua, ref, 10)
     if code == 200:
         return Response(body, content_type=ct or 'application/octet-stream')
     # fallback: redirect browser directly to CDN
@@ -765,9 +780,17 @@ def proxy_manifest(slug, idx):
     raw_url, drm_kid, drm_key = s['stream_url'], s.get('drm_kid', ''), s.get('drm_key', '')
     url = _clean_url(raw_url)
     ua = s.get('user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ref = s.get('referer', '') or ''
+    if not ref:
+        p = urlparse(url)
+        ref = f'{p.scheme}://{p.netloc}/' if p.netloc else ''
     for attempt in range(3):
         try:
-            r = _media_sess().get(url, headers={'User-Agent': ua, 'Accept': '*/*'}, timeout=10)
+            hdrs = {'User-Agent': ua, 'Accept': '*/*'}
+            if ref:
+                hdrs['Referer'] = ref
+                hdrs['Origin'] = ref.rstrip('/')
+            r = _media_sess().get(url, headers=hdrs, timeout=15)
             if r.status_code == 200:
                 body = r.text
             else:
@@ -781,6 +804,7 @@ def proxy_manifest(slug, idx):
                         '</AdaptationSet>',
                         '<ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d12e" value="ClearKey"/>\n</AdaptationSet>',
                         0)
+                body = re.sub(r'<BaseURL>[^<]*</BaseURL>', '', body)
             _manifest_cache[key] = (time.time(), body)
             return Response(body, content_type='application/dash+xml')
         except Exception:
