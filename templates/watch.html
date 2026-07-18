@@ -1400,7 +1400,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
           function dashFallback(){
             if(dashProxyDone)return;
             dashProxyDone=true;
-            try{player&&player.destroy&&player.destroy();}catch(_{})
+            try{player&&player.destroy&&player.destroy();}catch(_){}
             player=null;
             if(!dashTriedProxy){
               dashTriedProxy=true;
