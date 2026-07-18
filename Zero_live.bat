@@ -47,10 +47,10 @@ robocopy "!UPDATE_SRC!" "!PROJ_DIR!" /E /XD "python" /XF "version.txt" "Zero_liv
 set RC=!ERRORLEVEL!
 
 if !RC! LSS 8 (
-    echo(!LATEST_SHA!>"!VERSION_FILE!"
+    > "!VERSION_FILE!" echo(!LATEST_SHA!
     "!PYTHON!" -m pip install -r "!PROJ_DIR!\requirements.txt" --quiet
     REM Save new bat so it gets applied on next restart
-    if exist "!UPDATE_SRC!\Zero_live.bat" copy /Y "!UPDATE_SRC!\Zero_live.bat" "!PROJ_DIR!\Zero_live.new.bat" >nul 2>&1
+    if exist "!UPDATE_SRC!\Zero_live.bat" copy /Y "!UPDATE_SRC!\Zero_live.bat" "!PROJ_DIR!\Zero_live.bat.new" >nul 2>&1
     echo [UPDATE] Update complete.
 ) else (
     echo [UPDATE] Copy failed, skipping.
@@ -81,10 +81,9 @@ if "%BROWSER_OPENED%"=="0" (
   start /b "" http://127.0.0.1:9090
 )
 REM Apply new bat if one was saved during update
-if exist "%~dp0Zero_live.new.bat" (
-    copy /Y "%~dp0Zero_live.new.bat" "%~dp0Zero_live.bat" >nul 2>&1
-    del "%~dp0Zero_live.new.bat" >nul 2>&1
-    echo [UPDATE] Batch file updated.
+if exist "%~dp0Zero_live.bat.new" (
+    move /Y "%~dp0Zero_live.bat.new" "%~dp0Zero_live.bat" >nul
+    echo [UPDATE] Launcher updated.
 )
 echo App exited (code !errorlevel!). Restarting in 3s...
 timeout /t 3 /nobreak >nul
