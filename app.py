@@ -143,11 +143,19 @@ _PB_TTL = 30
 _M3U_TTL = 30
 _FC_TTL = 60
 _TM_TTL = 60
+_SF_TTL = 60
+_ES_TTL = 60
 
 FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
 TAPMAD_SOURCE = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.json'
+SF_API = 'https://streamfree.top/api/v1'
+ES_API = 'https://api.esportex.site/api'
 _fc_cache = {}  # key -> (ts, data)
 _tm_cache = {}
+_sf_cache = {}
+_es_cache = {}
+
+_SF_CATEGORIES = ['soccer', 'cricket', 'basketball', 'football', 'hockey', 'baseball', 'racing', 'combat', 'tennis']
 
 def _fetch_tapmad():
     """Fetch TapMad events and normalize."""
@@ -208,6 +216,143 @@ def _fetch_tapmad():
     return events
 
 
+def _fetch_streamfree():
+    """Fetch StreamFree events from all categories in parallel."""
+    def _fetch_cat(cat):
+        try:
+            _, body = _http_get(f"{SF_API}/streams?category={cat}")
+            if not body:
+                return []
+            data = json.loads(body)
+            return data.get('streams', []) if isinstance(data, dict) else []
+        except Exception as e:
+            _log.debug('StreamFree fetch failed (%s): %s', cat, e)
+            return []
+    try:
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            results = list(pool.map(_fetch_cat, _SF_CATEGORIES))
+    except Exception:
+        results = [_fetch_cat(c) for c in _SF_CATEGORIES]
+    events = []
+    for streams in results:
+        for item in streams:
+            mid = item.get('stream_key') or item.get('id', '')
+            if not mid:
+                continue
+            t1 = (item.get('team1') or {}).get('name', '') or 'TBD'
+            t2 = (item.get('team2') or {}).get('name', '') or 'TBD'
+            embed_url = item.get('embed_url', '')
+            if not embed_url:
+                continue
+            ts = item.get('match_timestamp', 0)
+            ev = {
+                'id': f'sf_{mid}',
+                'enc_parent': f'sf_{mid}',
+                'parent': f'sf_{mid}',
+                'team_a_name': t1,
+                'team_b_name': t2,
+                'team_a_logo': (item.get('team1') or {}).get('logo', ''),
+                'team_b_logo': (item.get('team2') or {}).get('logo', ''),
+                'sport': item.get('category', 'Sports'),
+                'league': 'StreamFree',
+                'title': item.get('name', f'{t1} vs {t2}'),
+                'starts_at': '',
+                'is_live': 1 if ts and (ts * 1000) <= (time.time() * 1000) else 0,
+                'is_streamfree': True,
+                'streams': [{
+                    'source': 'StreamFree',
+                    'stream_url': embed_url,
+                    'stream_type': 'embed',
+                }],
+            }
+            events.append(ev)
+    return events
+
+
+def _fetch_esportex():
+    """Fetch ESportex events from all categories."""
+    try:
+        _, body = _http_get(f"{ES_API}/streams")
+        if not body:
+            return []
+        data = json.loads(body)
+        if not isinstance(data, dict) or not data.get('success'):
+            return []
+    except Exception as e:
+        _log.debug('ESportex fetch failed: %s', e)
+        return []
+    _cat_map = {
+        'football': 'football', 'cricket': 'cricket', 'basketball': 'basketball',
+        'amfootball': 'football', 'hockey': 'hockey', 'baseball': 'baseball',
+        'race': 'racing', 'fight': 'combat', 'tennis': 'tennis',
+    }
+    events = []
+    for api_cat, matches in data.items():
+        if api_cat == 'success' or not isinstance(matches, list):
+            continue
+        sport = _cat_map.get(api_cat, api_cat)
+        for item in matches:
+            tag = item.get('tag', '')
+            parts = tag.split(' vs ') if ' vs ' in tag else tag.split(' - ')
+            t1 = parts[0].strip() if len(parts) > 0 else 'TBD'
+            t2 = parts[1].strip() if len(parts) > 1 else 'TBD'
+            slug = item.get('slug', '')
+            iframes = item.get('iframes', [])
+            if not iframes:
+                continue
+            streams = []
+            for iframe in iframes:
+                url = iframe.get('url', '')
+                if not url:
+                    continue
+                url = url.replace('http://', 'https://')
+                streams.append({
+                    'source': iframe.get('server', 'ESportex'),
+                    'stream_url': url,
+                    'stream_type': 'embed',
+                })
+            kickoff = item.get('kickoff', '')
+            is_live = 0
+            if kickoff:
+                try:
+                    kt = _parse_kickoff(kickoff)
+                    if kt and kt <= time.time():
+                        is_live = 1
+                except Exception:
+                    pass
+            ev = {
+                'id': f'es_{slug}',
+                'enc_parent': f'es_{slug}',
+                'parent': f'es_{slug}',
+                'team_a_name': t1,
+                'team_b_name': t2,
+                'team_a_logo': '',
+                'team_b_logo': '',
+                'sport': item.get('league', sport),
+                'league': 'ESportex',
+                'title': tag,
+                'starts_at': '',
+                'is_live': is_live,
+                'is_esportex': True,
+                'streams': streams,
+            }
+            events.append(ev)
+    return events
+
+
+def _parse_kickoff(kickoff):
+    """Parse ESportex kickoff string to timestamp."""
+    try:
+        from datetime import datetime, timezone, timedelta
+        dt = datetime.strptime(kickoff, '%Y-%m-%d %H:%M').replace(tzinfo=timezone(timedelta(hours=7)))
+        return dt.timestamp()
+    except Exception:
+        try:
+            return datetime.fromisoformat(kickoff.replace(' ', 'T')).timestamp()
+        except Exception:
+            return None
+
+
 def _make_dedup_key(team_a, team_b):
     a = (team_a or '').lower().strip()
     b = (team_b or '').lower().strip()
@@ -263,7 +408,7 @@ def _dedup_merge(all_events):
                 existing['team_a_logo'] = ev['team_a_logo']
             if not existing.get('team_b_logo') and ev.get('team_b_logo'):
                 existing['team_b_logo'] = ev['team_b_logo']
-            for flag in ('is_fancode', 'is_tapmad'):
+            for flag in ('is_fancode', 'is_tapmad', 'is_streamfree', 'is_esportex'):
                 if ev.get(flag):
                     existing[flag] = True
             # Copy FanCode stream data into merged event
@@ -316,7 +461,7 @@ def _pb_cached(slug):
         return []
     # Always try upstream stream resolution (fails safely for non-upstream slugs)
     upstream_streams = []
-    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad')
+    is_new_source = ev.get('is_fancode') or ev.get('is_tapmad') or ev.get('is_streamfree') or ev.get('is_esportex')
     try:
         servers = _fetch_playback(slug)
         if servers:
@@ -469,7 +614,9 @@ def _get_events():
     upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
     fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
     tm = _cached('tapmad', _TM_TTL, _fetch_tapmad, _tm_cache)
-    all_events = (upstream or []) + (fc or []) + (tm or [])
+    sf = _cached('streamfree', _SF_TTL, _fetch_streamfree, _sf_cache)
+    es = _cached('esportex', _ES_TTL, _fetch_esportex, _es_cache)
+    all_events = (upstream or []) + (fc or []) + (tm or []) + (sf or []) + (es or [])
     return _dedup_merge(all_events)
 
 @app.route('/watch/<slug>')
