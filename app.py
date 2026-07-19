@@ -1,6 +1,6 @@
 import os, sys, re, base64, hashlib, json, logging, time, threading, subprocess, asyncio, shutil, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin, quote as url_quote
+from urllib.parse import urlparse, urljoin, quote as url_quote, unquote
 from pathlib import Path
 from flask import Flask, redirect, send_from_directory, Response, request, jsonify, render_template, url_for
 from curl_cffi import requests as curl_requests
@@ -97,7 +97,7 @@ def _fetch_fancode():
         if not items:
             return []
     except Exception as e:
-        _log.debug('FanCode fetch failed: %s', e)
+        _log.warning('FanCode fetch failed: %s', e)
         return []
     _bad_team = re.compile(r'^(Day \d|World Feed|Court \d|Feed \d|Coverage)', re.IGNORECASE)
     events = []
@@ -156,6 +156,59 @@ _tm_cache = {}
 _sf_cache = {}
 _es_cache = {}
 
+_seg_prefetch = {}       # url -> (ts, bytes, content_type)
+_SEG_PREFETCH_TTL = 30   # seconds
+_SEG_PREFETCH_WORKERS = 8
+_seg_pool = ThreadPoolExecutor(max_workers=_SEG_PREFETCH_WORKERS)
+
+def _prefetch_segments(urls, ref=''):
+    """Background-prefetch a list of segment URLs into _seg_prefetch cache."""
+    now = time.time()
+    # Evict stale entries
+    stale = [k for k, v in _seg_prefetch.items() if now - v[0] > _SEG_PREFETCH_TTL * 2]
+    for k in stale[:50]:
+        _seg_prefetch.pop(k, None)
+    to_fetch = []
+    for u in urls:
+        if u in _seg_prefetch and now - _seg_prefetch[u][0] < _SEG_PREFETCH_TTL:
+            continue
+        to_fetch.append(u)
+    if not to_fetch:
+        return
+    def _fetch_one(url):
+        try:
+            hdrs = _build_seg_headers(url, ref)
+            r = _media_sess().get(url, headers=hdrs, timeout=10)
+            if r.status_code == 200:
+                _seg_prefetch[url] = (time.time(), r.content, r.headers.get('content-type', 'video/mp2t'))
+        except Exception:
+            pass
+    for u in to_fetch[:15]:
+        _seg_pool.submit(_fetch_one, u)
+
+def _prefetch_hls_segments(m3u8_text, ref=''):
+    """Parse rewritten m3u8, extract segment URLs, prefetch them in background."""
+    urls = []
+    for line in m3u8_text.split('\n'):
+        s = line.strip()
+        if s and not s.startswith('#') and '/proxy/hls/seg/' in s:
+            m = re.search(r'[?&]url=([^&]+)', s)
+            if m:
+                urls.append(unquote(m.group(1)))
+    if urls:
+        _prefetch_segments(urls, ref)
+
+def _prefetch_dash_segments(mpd_text, base_url, ref=''):
+    """Parse DASH manifest, extract segment URLs, prefetch them in background."""
+    urls = []
+    for m in re.finditer(r'<SegmentURL\s+media="([^"]+)"', mpd_text):
+        seg = m.group(1)
+        urls.append(urljoin(base_url, seg))
+    for m in re.finditer(r'<SegmentTemplate[^>]+media="([^"]+)"', mpd_text):
+        urls.append(urljoin(base_url, m.group(1)))
+    if urls:
+        _prefetch_segments(urls[:20], ref)
+
 _SF_CATEGORIES = ['soccer', 'cricket']
 
 _SF_QUALITY_PREF = ['720p', '1080p', '540p', '2160p']
@@ -169,7 +222,7 @@ def _fetch_tapmad():
         if not items:
             return []
     except Exception as e:
-        _log.debug('TapMad fetch failed: %s', e)
+        _log.warning('TapMad fetch failed: %s', e)
         return []
     events = []
     for item in items:
@@ -229,7 +282,7 @@ def _fetch_streamfree():
             data = json.loads(body)
             return data.get('streams', []) if isinstance(data, dict) else []
         except Exception as e:
-            _log.debug('StreamFree fetch failed (%s): %s', cat, e)
+            _log.warning('StreamFree fetch failed (%s): %s', cat, e)
             return []
     try:
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -344,7 +397,7 @@ def _fetch_esportex():
         if not isinstance(data, dict) or not data.get('success'):
             return []
     except Exception as e:
-        _log.debug('ESportex fetch failed: %s', e)
+        _log.warning('ESportex fetch failed: %s', e)
         return []
     _cat_map = {
         'football': 'football', 'cricket': 'cricket',
@@ -898,25 +951,35 @@ def _hls_rewrite(body, base_dir):
     return '\n'.join(out)
 
 def _hls_rewrite_proxy(body, base_url, slug, idx, referer=''):
-    """Rewrite m3u8 so all sub-playlists and segments go through our proxy."""
+    """Rewrite m3u8 so all sub-playlists and segments go through our proxy.
+
+    Sub-playlists go through /proxy/hls/{slug}/{idx}/ (needs slug for further rewriting).
+    Binary segments go through /proxy/hls/seg/ (lightweight, streams directly).
+    """
     lines = body.split('\n')
     out = []
     base_dir = base_url[:base_url.rfind('/') + 1]
-    prefix = f'/proxy/hls/{slug}/{idx}/'
+    pl_prefix = f'/proxy/hls/{slug}/{idx}/'
+    seg_prefix = '/proxy/hls/seg/'
     ref_qs = ('&referer=' + url_quote(referer, safe='')) if referer else ''
     for line in lines:
         s = line.strip()
         if not s:
             out.append(line)
         elif s[0] == '#':
-            def _rewrite_uri(m, _base=base_dir, _pfx=prefix, _refqs=ref_qs):
+            def _rewrite_uri(m, _base=base_dir, _pfx=pl_prefix, _refqs=ref_qs):
                 raw = m.group(1) or m.group(2)
                 abs_url = urljoin(_base, raw)
-                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + _refqs + '"'
+                if '.m3u8' in abs_url.lower():
+                    return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + _refqs + '"'
+                return 'URI="' + _pfx + '?url=' + url_quote(abs_url, safe='') + _refqs + '"'
             out.append(re.sub(r'''URI=["']([^"']*)["']|URI=(\S+)''', _rewrite_uri, line))
         else:
             abs_url = urljoin(base_dir, s)
-            out.append(prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + ref_qs)
+            if '.m3u8' in abs_url.lower():
+                out.append(pl_prefix + '?url=' + url_quote(abs_url, safe='') + '&rewrite=1' + ref_qs)
+            else:
+                out.append(seg_prefix + '?url=' + url_quote(abs_url, safe='') + ref_qs)
     return '\n'.join(out)
 
 def _proxy_fetch(url, ua, ref='', timeout=10):
@@ -946,6 +1009,54 @@ def _proxy_fetch(url, ua, ref='', timeout=10):
             time.sleep(0.5)
     return 0, b'', ''
 
+def _build_seg_headers(url, ref=''):
+    hdrs = {'Accept': '*/*'}
+    if ref:
+        hdrs['Referer'] = ref
+        if '://' in ref:
+            hdrs['Origin'] = ref.rsplit('/', 1)[0]
+    else:
+        p = urlparse(url)
+        if p.netloc:
+            hdrs['Referer'] = f'{p.scheme}://{p.netloc}/'
+            hdrs['Origin'] = f'{p.scheme}://{p.netloc}'
+    return hdrs
+
+@app.route('/proxy/hls/seg/')
+def proxy_hls_seg():
+    """Streaming segment proxy — no slug lookup, streams bytes directly. Serves from prefetch cache if available."""
+    url = request.args.get('url', '')
+    ref = request.args.get('referer', '')
+    if not url:
+        return jsonify({"error": "Missing url"}), 400
+    url = _clean_url(url)
+    hit = _seg_prefetch.get(url)
+    if hit and time.time() - hit[0] < _SEG_PREFETCH_TTL:
+        return Response(hit[1], status=200, headers={
+            'Content-Type': hit[2], 'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=30', 'X-Cache': 'HIT',
+        })
+    hdrs = _build_seg_headers(url, ref)
+    for attempt in range(2):
+        try:
+            r = _media_sess().get(url, headers=hdrs, timeout=12, stream=True)
+            if r.status_code == 200:
+                ct = r.headers.get('content-type', 'video/mp2t')
+                cl = r.headers.get('content-length', '')
+                resp_headers = {
+                    'Content-Type': ct,
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'public, max-age=30',
+                }
+                if cl:
+                    resp_headers['Content-Length'] = cl
+                return Response(r.iter_content(chunk_size=65536), status=200,
+                                headers=resp_headers)
+            _log.debug('seg_proxy attempt %d: %s -> HTTP %d', attempt+1, url[:80], r.status_code)
+        except Exception as e:
+            _log.debug('seg_proxy attempt %d: %s -> %s', attempt+1, url[:80], e)
+    return jsonify({"error": "Upstream failed"}), 502
+
 @app.route('/proxy/hls/<slug>/<int:idx>/')
 def proxy_hls(slug, idx):
     target = request.args.get('url', '')
@@ -963,13 +1074,33 @@ def proxy_hls(slug, idx):
         target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
     ref = request.args.get('referer', '') or s.get('referer', '')
     ua = request.args.get('user_agent', '') or s.get('user_agent', '') or _UA_MOBILE
+    is_media = not ('.m3u8' in target)
+    if is_media:
+        hdrs = _build_seg_headers(target, ref)
+        for attempt in range(2):
+            try:
+                r = _media_sess().get(target, headers=hdrs, timeout=12, stream=True)
+                if r.status_code == 200:
+                    ct = r.headers.get('content-type', 'video/mp2t')
+                    cl = r.headers.get('content-length', '')
+                    resp_h = {'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=30'}
+                    if cl:
+                        resp_h['Content-Length'] = cl
+                    return Response(r.iter_content(chunk_size=65536), status=200, headers=resp_h)
+            except Exception:
+                pass
+        return jsonify({"error": "Upstream failed"}), 502
     code, body, ct = _proxy_fetch(target, ua, ref, 15)
     if code == 200:
         text = body.decode('utf-8', errors='replace')
-        if '.m3u8' in target or text.startswith('#EXT'):
+        if text.startswith('#EXT'):
             if rewrite:
-                return Response(_hls_rewrite_proxy(text, target, slug, idx, ref), content_type='application/vnd.apple.mpegurl')
-            return Response(_hls_rewrite(text, target[:target.rfind('/') + 1]), content_type='application/vnd.apple.mpegurl')
+                rewritten = _hls_rewrite_proxy(text, target, slug, idx, ref)
+                _prefetch_hls_segments(rewritten, ref)
+                return Response(rewritten, content_type='application/vnd.apple.mpegurl')
+            normal = _hls_rewrite(text, target[:target.rfind('/') + 1])
+            _prefetch_hls_segments(normal, ref)
+            return Response(normal, content_type='application/vnd.apple.mpegurl')
         return Response(body, content_type=ct or 'application/octet-stream')
     return jsonify({"error": "Upstream failed"}), 502
 
@@ -985,6 +1116,13 @@ def proxy_dash_seg(slug, idx, seg_path):
     qs = request.query_string
     if qs:
         target += '?' + (qs.decode() if isinstance(qs, bytes) else qs)
+    target = _clean_url(target)
+    hit = _seg_prefetch.get(target)
+    if hit and time.time() - hit[0] < _SEG_PREFETCH_TTL:
+        return Response(hit[1], status=200, headers={
+            'Content-Type': hit[2], 'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=30', 'X-Cache': 'HIT',
+        })
     ua = s.get('user_agent', '') or _UA_MOBILE
     ref = s.get('referer', '') or ''
     if not ref:
@@ -993,7 +1131,6 @@ def proxy_dash_seg(slug, idx, seg_path):
     code, body, ct = _proxy_fetch(target, ua, ref, 10)
     if code == 200:
         return Response(body, content_type=ct or 'application/octet-stream')
-    # fallback: redirect browser directly to CDN
     return redirect(target)
 
 @app.route('/proxy/manifest/<slug>/<int:idx>/')
@@ -1037,6 +1174,9 @@ def proxy_manifest(slug, idx):
                         0)
                 body = re.sub(r'<BaseURL>[^<]*</BaseURL>', '', body)
             _manifest_cache[key] = (time.time(), body)
+            if '.mpd' in url:
+                base_dir = url[:url.rfind('/') + 1]
+                _prefetch_dash_segments(body, base_dir, ref)
             return Response(body, content_type='application/dash+xml')
         except Exception:
             pass
