@@ -1073,6 +1073,8 @@ def proxy_hls(slug, idx):
     if not p.netloc:
         target = urljoin(_clean_url(s['stream_url'][:s['stream_url'].rfind('/') + 1]), target)
     ref = request.args.get('referer', '') or s.get('referer', '')
+    if not ref and ('akamaized.net' in target or 'tapmad' in target.lower()):
+        ref = 'https://www.tapmad.com/'
     ua = request.args.get('user_agent', '') or s.get('user_agent', '') or _UA_MOBILE
     is_media = not ('.m3u8' in target)
     if is_media:
