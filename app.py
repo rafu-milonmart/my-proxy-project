@@ -149,13 +149,16 @@ _ES_TTL = 60
 FC_SOURCE = 'https://raw.githubusercontent.com/srhady/Fancode-bd/refs/heads/main/main_playlist.json'
 TAPMAD_SOURCE = 'https://raw.githubusercontent.com/srhady/tapmad-bd/refs/heads/main/tapmad_bd.json'
 SF_API = 'https://streamfree.top/api/v1'
+SF_BASE = 'https://streamfree.top'
 ES_API = 'https://api.esportex.site/api'
 _fc_cache = {}  # key -> (ts, data)
 _tm_cache = {}
 _sf_cache = {}
 _es_cache = {}
 
-_SF_CATEGORIES = ['soccer', 'cricket', 'basketball', 'football', 'hockey', 'baseball', 'racing', 'combat', 'tennis']
+_SF_CATEGORIES = ['soccer', 'cricket']
+
+_SF_QUALITY_PREF = ['720p', '1080p', '540p', '2160p']
 
 def _fetch_tapmad():
     """Fetch TapMad events and normalize."""
@@ -217,7 +220,7 @@ def _fetch_tapmad():
 
 
 def _fetch_streamfree():
-    """Fetch StreamFree events from all categories in parallel."""
+    """Fetch StreamFree events — extract real HLS URLs via token scraping."""
     def _fetch_cat(cat):
         try:
             _, body = _http_get(f"{SF_API}/streams?category={cat}")
@@ -233,44 +236,106 @@ def _fetch_streamfree():
             results = list(pool.map(_fetch_cat, _SF_CATEGORIES))
     except Exception:
         results = [_fetch_cat(c) for c in _SF_CATEGORIES]
-    events = []
+    raw_streams = []
     for streams in results:
-        for item in streams:
-            mid = item.get('stream_key') or item.get('id', '')
-            if not mid:
-                continue
-            t1 = (item.get('team1') or {}).get('name', '') or 'TBD'
-            t2 = (item.get('team2') or {}).get('name', '') or 'TBD'
-            embed_url = item.get('embed_url', '')
-            if not embed_url:
-                continue
-            ts = item.get('match_timestamp', 0)
-            ev = {
-                'id': f'sf_{mid}',
-                'enc_parent': f'sf_{mid}',
-                'parent': f'sf_{mid}',
-                'team_a_name': t1,
-                'team_b_name': t2,
-                'team_a_logo': (item.get('team1') or {}).get('logo', ''),
-                'team_b_logo': (item.get('team2') or {}).get('logo', ''),
-                'sport': item.get('category', 'Sports'),
-                'league': 'StreamFree',
-                'title': item.get('name', f'{t1} vs {t2}'),
-                'starts_at': '',
-                'is_live': 1 if ts and (ts * 1000) <= (time.time() * 1000) else 0,
-                'is_streamfree': True,
-                'streams': [{
-                    'source': 'StreamFree',
-                    'stream_url': embed_url,
-                    'stream_type': 'embed',
-                }],
-            }
-            events.append(ev)
+        raw_streams.extend(streams)
+    if not raw_streams:
+        return []
+
+    def _resolve_stream(item):
+        """For one StreamFree stream: fetch embed page, extract tokens, build HLS URL."""
+        key = item.get('stream_key') or item.get('id', '')
+        if not key:
+            return None
+        embed_url = item.get('embed_url', '')
+        if not embed_url:
+            return None
+        try:
+            _, html = _http_get(embed_url)
+            if not html:
+                return None
+            m = re.search(r'const _0x\s*=\s*(\{.*?\});', html)
+            if not m:
+                return None
+            tokens = json.loads(m.group(1))
+        except Exception as e:
+            _log.debug('StreamFree token scrape failed (%s): %s', key, e)
+            return None
+        # Check stream status for available qualities
+        best_q = '720p'
+        try:
+            _, sb = _http_get(f"{SF_BASE}/api/stream-status/{key}")
+            if sb:
+                status = json.loads(sb)
+                quals = status.get('qualities', {})
+                for q in _SF_QUALITY_PREF:
+                    if quals.get(q):
+                        best_q = q
+                        break
+        except Exception:
+            pass
+        # Get server type
+        server_name = 'origin'
+        try:
+            _, kb = _http_get(f"{SF_BASE}/get-stream-key/{key}")
+            if kb:
+                kdata = json.loads(kb)
+                server_name = kdata.get('server_name', 'origin')
+        except Exception:
+            pass
+        # Build HLS URL
+        path = 'live-cdn' if server_name != 'origin' else 'live'
+        p = tokens.get(best_q) or tokens.get('720p') or next(iter(tokens.values()), None)
+        if not p:
+            return None
+        url = f"https://streamfree.top/{path}/{key}{best_q}/index.m3u8?_t={p['_t']}&_e={p['_e']}&_n={p['_n']}"
+        return {
+            'source': 'StreamFree',
+            'stream_url': url,
+            'stream_type': 'hls',
+            'needs_proxy': True,
+            'referer': 'https://streamfree.top/',
+        }
+
+    events = []
+    for item in raw_streams:
+        mid = item.get('stream_key') or item.get('id', '')
+        if not mid:
+            continue
+        t1 = (item.get('team1') or {}).get('name', '') or 'TBD'
+        t2 = (item.get('team2') or {}).get('name', '') or 'TBD'
+        ts = item.get('match_timestamp', 0)
+        ev = {
+            'id': f'sf_{mid}',
+            'enc_parent': f'sf_{mid}',
+            'parent': f'sf_{mid}',
+            'team_a_name': t1,
+            'team_b_name': t2,
+            'team_a_logo': (item.get('team1') or {}).get('logo', ''),
+            'team_b_logo': (item.get('team2') or {}).get('logo', ''),
+            'sport': item.get('category', 'Sports'),
+            'league': 'StreamFree',
+            'title': item.get('name', f'{t1} vs {t2}'),
+            'starts_at': '',
+            'is_live': 1 if ts and (ts * 1000) <= (time.time() * 1000) else 0,
+            'is_streamfree': True,
+            'streams': [],
+        }
+        try:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                resolved = pool.submit(_resolve_stream, item).result(timeout=10)
+            if resolved:
+                ev['streams'] = [resolved]
+        except Exception:
+            pass
+        if not ev['streams']:
+            ev['streams'] = [{'source': 'StreamFree', 'stream_url': item.get('embed_url', ''), 'stream_type': 'embed'}]
+        events.append(ev)
     return events
 
 
 def _fetch_esportex():
-    """Fetch ESportex events from all categories."""
+    """Fetch ESportex events — scrape iframe pages for real HLS URLs."""
     try:
         _, body = _http_get(f"{ES_API}/streams")
         if not body:
@@ -282,13 +347,11 @@ def _fetch_esportex():
         _log.debug('ESportex fetch failed: %s', e)
         return []
     _cat_map = {
-        'football': 'football', 'cricket': 'cricket', 'basketball': 'basketball',
-        'amfootball': 'football', 'hockey': 'hockey', 'baseball': 'baseball',
-        'race': 'racing', 'fight': 'combat', 'tennis': 'tennis',
+        'football': 'football', 'cricket': 'cricket',
     }
     events = []
     for api_cat, matches in data.items():
-        if api_cat == 'success' or not isinstance(matches, list):
+        if api_cat not in _cat_map or not isinstance(matches, list):
             continue
         sport = _cat_map.get(api_cat, api_cat)
         for item in matches:
@@ -302,15 +365,25 @@ def _fetch_esportex():
                 continue
             streams = []
             for iframe in iframes:
-                url = iframe.get('url', '')
+                url = iframe.get('url', '').replace('http://', 'https://')
+                server = iframe.get('server', 'ESportex')
                 if not url:
                     continue
-                url = url.replace('http://', 'https://')
-                streams.append({
-                    'source': iframe.get('server', 'ESportex'),
-                    'stream_url': url,
-                    'stream_type': 'embed',
-                })
+                hls_url = _scrape_iframe_hls(url)
+                if hls_url:
+                    streams.append({
+                        'source': server,
+                        'stream_url': hls_url,
+                        'stream_type': 'hls',
+                        'needs_proxy': True,
+                        'referer': url.split('/')[0] + '//' + urlparse(url).netloc + '/',
+                    })
+                else:
+                    streams.append({
+                        'source': server,
+                        'stream_url': url,
+                        'stream_type': 'embed',
+                    })
             kickoff = item.get('kickoff', '')
             is_live = 0
             if kickoff:
@@ -338,6 +411,19 @@ def _fetch_esportex():
             }
             events.append(ev)
     return events
+
+
+def _scrape_iframe_hls(url):
+    """Fetch an iframe page and extract an HLS (.m3u8) URL if present."""
+    try:
+        _, html = _http_get(url)
+        if html:
+            urls = re.findall(r'https?://[^\s"\'\\]+\.m3u8[^\s"\'\\]*', html)
+            if urls:
+                return urls[0]
+    except Exception:
+        pass
+    return None
 
 
 def _parse_kickoff(kickoff):
