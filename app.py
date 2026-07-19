@@ -1002,9 +1002,9 @@ def _proxy_fetch(url, ua, ref='', timeout=10):
             r = _media_sess().get(url, headers=hdrs, timeout=timeout)
             if r.status_code == 200:
                 return r.status_code, r.content, r.headers.get('content-type', '')
-            _log.debug('proxy_fetch attempt %d: %s -> HTTP %d', attempt+1, url[:80], r.status_code)
+            _log.warning('proxy_fetch attempt %d: %s -> HTTP %d', attempt+1, url[:80], r.status_code)
         except Exception as e:
-            _log.debug('proxy_fetch attempt %d: %s -> %s', attempt+1, url[:80], e)
+            _log.warning('proxy_fetch attempt %d: %s -> %s', attempt+1, url[:80], e)
         if attempt < 2:
             time.sleep(0.5)
     return 0, b'', ''
