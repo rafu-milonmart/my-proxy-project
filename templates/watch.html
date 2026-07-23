@@ -924,6 +924,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   var maxFallbackAttempts = 8;
   var streamLatencies = {};
   var loadStartTime = 0;
+  var stalledIdx = -1;
   var E=function(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];})};
   var L = function(msg, data) {
     try {
@@ -937,6 +938,19 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
   }
   if(typeof shaka!=='undefined')shaka.polyfill.installAll();
 
+  function refreshStreams(callback) {
+    fetch('/api/playback/' + encodeURIComponent(slug))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.streams && data.streams.length) {
+          streams = data.streams;
+          L('refreshStreams: got ' + streams.length + ' fresh streams');
+        }
+        callback();
+      })
+      .catch(function() { L('refreshStreams: failed, using stale'); callback(); });
+  }
+
   function tryNext(idx){
     L('tryNext('+idx+') fallbackAttempts='+(fallbackAttempts+1)+'/'+maxFallbackAttempts+' retryCount='+retryCount+'/'+maxRetries);
     fallbackAttempts++;
@@ -947,9 +961,9 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
       return false;
     }
     var next=idx+1;
-    L('tryNext: scanning from idx='+next+' of '+((streams||[]).length)+' streams');
+    L('tryNext: scanning from idx='+next+' of '+((streams||[]).length)+' streams stalledIdx='+stalledIdx);
     while(next<(streams||[]).length){
-      if(!fallbackTried[next]){
+      if(!fallbackTried[next]&&next!==stalledIdx){
         L('tryNext: trying stream '+next);
         fallbackTried[next]=true;loadStream(next);return true;
       }
@@ -957,11 +971,24 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     }
     if(retryCount<maxRetries){
       retryCount++;
-      L('tryNext: all streams exhausted, retry '+retryCount+'/'+maxRetries+' in 10s');
+      L('tryNext: all streams exhausted, retry '+retryCount+'/'+maxRetries+' in 10s (will refresh streams)');
       showPlaceholder('All streams unavailable · Retry '+retryCount+'/'+maxRetries+' in 10s...');
       spinner.classList.remove('hidden');
       if(retryTimer)clearTimeout(retryTimer);
-      retryTimer=setTimeout(function(){L('tryNext: retry timer fired, restarting from 0');fallbackTried={};loadStream(0);},10000);
+      retryTimer=setTimeout(function(){
+        L('tryNext: retry timer fired, refreshing streams then restarting from 0');
+        fallbackTried={};
+        refreshStreams(function(){
+          var retryIdx = (stalledIdx === 0) ? Math.min(1, (streams||[]).length - 1) : 0;
+          if (retryIdx >= 0 && retryIdx < (streams||[]).length) {
+            stalledIdx = -1;
+            loadStream(retryIdx);
+          } else {
+            showPlaceholder('All streams unavailable');
+            spinner.classList.add('hidden');
+          }
+        });
+      },10000);
     }else{
       L('tryNext: all retries exhausted');
       showPlaceholder('All streams unavailable');
@@ -1425,10 +1452,42 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
             L('HLS: proxy stream, using proxy+rewrite');
             var phlsUrl='/proxy/hls/'+encodeURIComponent(slug)+'/'+idx+'/?rewrite=1';
             if(stream&&stream.referer)phlsUrl+='&referer='+encodeURIComponent(stream.referer);
-            var ph=new Hls({enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,liveDurationInfinity:true,lowLatencyMode:true});
-            ph.on(Hls.Events.MANIFEST_PARSED,function(){if(ph.levels)buildQualityMenu(ph.levels);qualityGroup.style.display='inline-flex';if(ph.live)setLiveMode(true);});
-            ph.on(Hls.Events.ERROR,function(e,data){if(data.fatal&&!fallbackTried[activeIdx+1])tryNext(activeIdx);});
-            ph.attachMedia(video);ph.loadSource(phlsUrl);player=ph;startPlay();
+            L('HLS proxy URL: '+phlsUrl);
+            function phProxyInit(u){
+              try{player&&player.destroy&&player.destroy();}catch(_){}
+              var ph=new Hls({enableWorker:true,maxBufferLength:60,maxMaxBufferLength:300,backbufferLength:60,liveSyncDuration:15,liveMaxLatencyDuration:60,startLevel:-1,liveDurationInfinity:true,lowLatencyMode:true});
+              var phDone=false;
+              var phTriedDirect=false;
+              var t=setTimeout(function(){
+                if(phDone)return;
+                L('HLS proxy: timeout on '+u.substring(0,80));
+                try{ph.destroy();}catch(_){}
+                phDone=true;
+                if(!phTriedDirect){
+                  phTriedDirect=true;
+                  L('HLS proxy: trying direct URL as fallback');
+                  setTimeout(function(){phProxyInit(rawUrl);},200);
+                }else{
+                  L('HLS proxy: both proxy and direct failed');
+                  tryNext(activeIdx);
+                }
+              },15000);
+              ph.on(Hls.Events.MANIFEST_PARSED,function(){
+                clearTimeout(t);
+                L('HLS proxy: manifest parsed, levels='+(ph.levels?ph.levels.length:0));
+                if(ph.levels)buildQualityMenu(ph.levels);qualityGroup.style.display='inline-flex';
+                if(ph.live)setLiveMode(true);
+                phDone=true;
+                player=ph;startPlay();
+              });
+              ph.on(Hls.Events.ERROR,function(e,data){
+                if(phDone)return;
+                L('HLS proxy error: type='+data.type+' details='+data.details+' fatal='+data.fatal);
+                if(data.fatal){clearTimeout(t);try{ph.destroy();}catch(_){}phDone=true;tryNext(activeIdx);}
+              });
+              ph.attachMedia(video);ph.loadSource(u);player=ph;
+            }
+            phProxyInit(phlsUrl);
           }else{
             L('HLS: trying direct, will fallback to proxy if needed');
             var hlsProxyDone=false;
@@ -1529,7 +1588,7 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     var idx=parseInt(btn.dataset.idx);
     if(!isNaN(idx)){
       L('User clicked server button idx='+idx+' resetting fallback state');
-      fallbackTried={};retryCount=0;fallbackAttempts=0;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);
+      fallbackTried={};retryCount=0;fallbackAttempts=0;stalledIdx=-1;if(retryTimer)clearTimeout(retryTimer);loadStream(idx);
     }
   });
 
@@ -1681,14 +1740,15 @@ main{max-width:1200px;margin:0 auto;padding:16px 20px 20px}
     if(activeIdx<0){stallTimer=setTimeout(checkStall,5000);return;}
     var elapsed=Date.now()-lastProgress;
     var loadAge=stallCheckStart?Date.now()-stallCheckStart:0;
-    if(loadAge<30000){stallTimer=setTimeout(checkStall,5000);return;}
+    if(loadAge<15000){stallTimer=setTimeout(checkStall,5000);return;}
     if(hasPlayed&&elapsed>30000&&video.readyState<3){
       isStalling=true;
-      L('Stall detected after '+Math.round(elapsed/1000)+'s, readyState='+video.readyState+', trying fallback');
-      if(!fallbackTried[activeIdx+1]){
-        tryNext(activeIdx);
-      }
-      setTimeout(function(){isStalling=false;},15000);
+      stalledIdx=activeIdx;
+      var curStream=streams[activeIdx]||{};
+      var curType=curStream.stream_type||'';
+      L('Stall detected after '+Math.round(elapsed/1000)+'s, readyState='+video.readyState+', stream='+activeIdx+' type='+curType);
+      tryNext(activeIdx);
+      setTimeout(function(){isStalling=false;},8000);
     }
     stallTimer=setTimeout(checkStall,5000);
   }

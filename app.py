@@ -81,6 +81,8 @@ _ev_cache = {}       # key -> (ts, data)
 _pb_cache = {}       # slug -> (ts, streams_list)
 _manifest_cache = {} # (slug, idx) -> (ts, body)
 _m3u_cache = {}
+_hls_m3u_cache = {}  # (slug, idx, url_hash) -> (ts, rewritten_text)
+_HLS_M3U_TTL = 5    # seconds — short for live streams
 _DECRYPT_KEY_CACHE = {}
 
 def _clean_url(url):
@@ -128,6 +130,7 @@ def _fetch_fancode():
             'title': item.get('event_name', f'{t1} vs {t2}'),
             'status': status,
             'is_fancode': True,
+            'is_live': 1 if status in ('LIVE', 'IN PLAY', 'IN-PLAY', 'PLAYING') else 0,
             'fancode_stream_url': stream_url,
             'fancode_language': item.get('language', ''),
         }
@@ -157,7 +160,7 @@ _sf_cache = {}
 _es_cache = {}
 
 _seg_prefetch = {}       # url -> (ts, bytes, content_type)
-_SEG_PREFETCH_TTL = 30   # seconds
+_SEG_PREFETCH_TTL = 45   # seconds
 _SEG_PREFETCH_WORKERS = 8
 _seg_pool = ThreadPoolExecutor(max_workers=_SEG_PREFETCH_WORKERS)
 
@@ -257,6 +260,7 @@ def _fetch_tapmad():
             'title': f'{t1} vs {t2}',
             'status': status,
             'is_tapmad': True,
+            'is_live': 1 if status in ('LIVE', 'IN PLAY', 'IN-PLAY', 'PLAYING') else 0,
             'streams': [
                 {
                     'source': 'TapMad',
@@ -652,10 +656,7 @@ def _media_sess():
     return _tlocal.media_session
 
 def _http_get(url, raw=False):
-    delays = [0, 1, 3]
-    for i, delay in enumerate(delays):
-        if delay:
-            time.sleep(delay)
+    for attempt in range(2):
         try:
             r = _sess().get(url)
             if r.status_code == 200:
@@ -750,12 +751,23 @@ def _fetch_events():
     return json.loads((_http_get(f"{UPSTREAM}/api/upstream/events")[1] or '{}')).get('events') or []
 
 def _get_events():
-    upstream = _cached('events', _EV_TTL, _fetch_events, _ev_cache)
-    fc = _cached('fancode', _FC_TTL, _fetch_fancode, _fc_cache)
-    tm = _cached('tapmad', _TM_TTL, _fetch_tapmad, _tm_cache)
-    sf = _cached('streamfree', _SF_TTL, _fetch_streamfree, _sf_cache)
-    es = _cached('esportex', _ES_TTL, _fetch_esportex, _es_cache)
-    all_events = (upstream or []) + (fc or []) + (tm or []) + (sf or []) + (es or [])
+    sources = [
+        ('events',  _EV_TTL,     _fetch_events,   _ev_cache),
+        ('fancode', _FC_TTL,     _fetch_fancode,   _fc_cache),
+        ('tapmad',  _TM_TTL,     _fetch_tapmad,    _tm_cache),
+        ('streamfree', _SF_TTL,  _fetch_streamfree, _sf_cache),
+        ('esportex', _ES_TTL,    _fetch_esportex,  _es_cache),
+    ]
+    futs = {_POOL.submit(_cached, *s): s[0] for s in sources}
+    results = {}
+    for f in as_completed(futs, timeout=30):
+        try:
+            results[futs[f]] = f.result()
+        except Exception:
+            results[futs[f]] = []
+    all_events = []
+    for key, _, _, _ in sources:
+        all_events.extend(results.get(key) or [])
     return _dedup_merge(all_events)
 
 @app.route('/watch/<slug>')
@@ -782,6 +794,13 @@ def stream_json(slug, idx):
         "type": s.get('stream_type', ''),
         "drm": {"key": s['drm_key'], "kid": s['drm_kid']} if s.get('drm_key') else None,
     })
+
+@app.route('/api/playback/<slug>')
+def api_playback(slug):
+    """Return fresh stream data, bypassing cache — used by client for stall recovery."""
+    _pb_cache.pop(slug, None)
+    streams = _pb_cached(slug)
+    return jsonify({"streams": streams})
 
 @app.route('/playlist.m3u')
 def playlist_m3u():
@@ -1076,28 +1095,22 @@ def proxy_hls(slug, idx):
     if not ref and ('akamaized.net' in target or 'tapmad' in target.lower()):
         ref = 'https://www.tapmad.com/'
     ua = request.args.get('user_agent', '') or s.get('user_agent', '') or _UA_MOBILE
-    is_media = not ('.m3u8' in target)
-    if is_media:
-        hdrs = _build_seg_headers(target, ref)
-        for attempt in range(2):
-            try:
-                r = _media_sess().get(target, headers=hdrs, timeout=12, stream=True)
-                if r.status_code == 200:
-                    ct = r.headers.get('content-type', 'video/mp2t')
-                    cl = r.headers.get('content-length', '')
-                    resp_h = {'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=30'}
-                    if cl:
-                        resp_h['Content-Length'] = cl
-                    return Response(r.iter_content(chunk_size=65536), status=200, headers=resp_h)
-            except Exception:
-                pass
-        return jsonify({"error": "Upstream failed"}), 502
+    _log.info('proxy_hls: slug=%s idx=%d target=%s ref=%s rewrite=%s', slug, idx, target[:80], ref[:40] if ref else '-', rewrite)
+    cache_key = (slug, idx, hash(target))
+    now = time.time()
+    if rewrite:
+        hit = _hls_m3u_cache.get(cache_key)
+        if hit and now - hit[0] < _HLS_M3U_TTL:
+            _prefetch_hls_segments(hit[1], ref)
+            return Response(hit[1], content_type='application/vnd.apple.mpegurl')
     code, body, ct = _proxy_fetch(target, ua, ref, 15)
     if code == 200:
         text = body.decode('utf-8', errors='replace')
-        if text.startswith('#EXT'):
+        is_m3u8 = text.lstrip().startswith('#EXT') or 'mpegurl' in (ct or '').lower() or '.m3u8' in target
+        if is_m3u8:
             if rewrite:
                 rewritten = _hls_rewrite_proxy(text, target, slug, idx, ref)
+                _hls_m3u_cache[cache_key] = (now, rewritten)
                 _prefetch_hls_segments(rewritten, ref)
                 return Response(rewritten, content_type='application/vnd.apple.mpegurl')
             normal = _hls_rewrite(text, target[:target.rfind('/') + 1])
